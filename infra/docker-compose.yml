@@ -1,0 +1,54 @@
+# Docker Compose for bond development environment
+# SIMPLIFIED FOR DEV ONLY - not production configuration
+
+version: '3.8'
+
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  api:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.api
+    ports:
+      - "8000:8000"
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - WS_HOST=localhost:8080
+      - BOND_SECRET=${BOND_SECRET:-bond-dev-secret-change-in-production}
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - ..:/app
+    command: uvicorn apps.api.main:app --host 0.0.0.0 --port 8000 --reload
+
+  broker:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.broker
+    ports:
+      - "8080:8080"
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - BOND_SECRET=${BOND_SECRET:-bond-dev-secret-change-in-production}
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - ..:/app
+    command: uvicorn apps.broker.broker:app --host 0.0.0.0 --port 8080 --reload
+
+volumes:
+  redis_data:

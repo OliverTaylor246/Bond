@@ -1,0 +1,32 @@
+Bond - Real-time Market Data Streaming Platform
+Copyright 2024-2025 Bond Contributors
+
+This product includes software developed by Bond contributors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+---
+
+This repository contains the Bond SDK, examples, and local development tools.
+
+Production-grade connectors, hosted runtime, and enterprise features
+are available through Bond Cloud (contact for access).
+
+Third-party dependencies and their licenses:
+- FastAPI (MIT License)
+- CCXT (MIT License)
+- Redis (BSD License)
+- Pydantic (MIT License)
+
+For data source compliance, see README.md - users must comply with
+all upstream Terms of Service (exchanges, Twitter/X, on-chain providers).

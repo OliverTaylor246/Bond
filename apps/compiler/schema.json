@@ -1,0 +1,127 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "StreamSpec",
+  "description": "Bond stream specification v1",
+  "type": "object",
+  "required": ["sources"],
+  "properties": {
+    "version": {
+      "type": "string",
+      "enum": ["v1"],
+      "default": "v1",
+      "description": "Schema version"
+    },
+    "name": {
+      "type": "string",
+      "description": "Optional stream name"
+    },
+    "description": {
+      "type": "string",
+      "description": "Optional stream description"
+    },
+    "sources": {
+      "type": "array",
+      "description": "List of data sources",
+      "items": {
+        "type": "object",
+        "required": ["type"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["ccxt", "ccxt.ticker", "ccxt.trades", "onchain", "onchain.grpc", "twitter", "x.tweets", "custom", "custom.ws"],
+            "description": "Source type"
+          },
+          "symbols": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Symbols to track (for ccxt/twitter)"
+          },
+          "chain": {
+            "type": "string",
+            "description": "Blockchain identifier (for onchain sources)"
+          },
+          "event_types": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": ["tx", "transfer", "metric", "block", "account"]
+            },
+            "description": "Event types to track (for onchain sources)"
+          },
+          "mode": {
+            "type": "string",
+            "description": "Custom source mode"
+          }
+        }
+      }
+    },
+    "interval_sec": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 3600,
+      "default": 5,
+      "description": "Aggregation window in seconds"
+    },
+    "symbols": {
+      "type": "array",
+      "items": {"type": "string"},
+      "default": ["BTC/USDT"],
+      "description": "Global symbols list"
+    },
+    "transforms": {
+      "type": "array",
+      "description": "Optional transform pipeline",
+      "items": {
+        "type": "object",
+        "required": ["op"],
+        "properties": {
+          "op": {
+            "type": "string",
+            "enum": ["resample", "count", "project"],
+            "description": "Transform operation"
+          }
+        },
+        "oneOf": [
+          {
+            "properties": {
+              "op": {"const": "resample"},
+              "window": {"type": "string"},
+              "on": {"type": "string"},
+              "agg": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": ["mean", "last", "sum", "min", "max", "count"]
+                }
+              }
+            },
+            "required": ["window"]
+          },
+          {
+            "properties": {
+              "op": {"const": "count"},
+              "window": {"type": "string"},
+              "as": {"type": "string"}
+            },
+            "required": ["window"]
+          },
+          {
+            "properties": {
+              "op": {"const": "project"},
+              "fields": {
+                "type": "array",
+                "items": {"type": "string"}
+              }
+            },
+            "required": ["fields"]
+          }
+        ]
+      }
+    },
+    "ttl_sec": {
+      "type": "integer",
+      "minimum": 60,
+      "description": "Optional stream TTL in seconds"
+    }
+  }
+}
