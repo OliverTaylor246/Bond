@@ -81,3 +81,9 @@ bond-*.whl
 # IDE specific
 .vscode/settings.json
 .idea/workspace.xml
+
+# Internal documentation (not for public repo)
+CLAUDE.md
+PROJECT_SUMMARY.md
+PUBLISH.md
+NOTICE
