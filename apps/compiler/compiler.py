@@ -65,9 +65,11 @@ def _parse_natural_language(text: str) -> dict[str, Any]:
         if len(match) == 2:
           symbols.append(f"{match[0]}/{match[1]}")
         else:
-          symbols.append(match[0])
+          # Single symbol, add /USDT suffix
+          symbols.append(f"{match[0]}/USDT")
       else:
-        symbols.append(match)
+        # Single symbol, add /USDT suffix
+        symbols.append(f"{match}/USDT")
 
   if not symbols:
     symbols = ["BTC/USDT"]  # default

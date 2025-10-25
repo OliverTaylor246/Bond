@@ -102,6 +102,17 @@ class StreamRuntime:
       twitter_src = x_stream(symbol.split("/")[0], interval=interval)
       custom_src = onchain_stream("sol", ["tx", "transfer"], interval)
 
+    # Create empty generators for missing sources
+    async def empty_stream():
+      while True:
+        await asyncio.sleep(999999)
+        yield  # Never actually yields
+
+    # Ensure all sources have values (use empty stream if None)
+    ccxt_src = ccxt_src or empty_stream()
+    twitter_src = twitter_src or empty_stream()
+    custom_src = custom_src or empty_stream()
+
     # Create pipeline
     pipeline = ThreeSourcePipeline(stream_id, interval, self.dispatcher)
 

@@ -84,24 +84,61 @@ class ThreeSourcePipeline:
   async def _flush_and_aggregate(self) -> None:
     """Aggregate buffered events and publish to Redis."""
     now = datetime.now(tz=timezone.utc)
-    
+
     # Calculate aggregates from trade buffer
     prices = [e["price"] for e in self.trade_buffer if "price" in e]
     volumes = [e["qty"] for e in self.trade_buffer if "qty" in e]
+    bids = [e["bid"] for e in self.trade_buffer if e.get("bid") is not None]
+    asks = [e["ask"] for e in self.trade_buffer if e.get("ask") is not None]
+    highs = [e["high"] for e in self.trade_buffer if e.get("high") is not None]
+    lows = [e["low"] for e in self.trade_buffer if e.get("low") is not None]
+    opens = [e["open"] for e in self.trade_buffer if e.get("open") is not None]
+    closes = [e["close"] for e in self.trade_buffer if e.get("close") is not None]
 
     price_avg = sum(prices) / len(prices) if prices else None
     volume_sum = sum(volumes) if volumes else None
+    bid_avg = sum(bids) / len(bids) if bids else None
+    ask_avg = sum(asks) / len(asks) if asks else None
+    price_high = max(highs) if highs else None
+    price_low = min(lows) if lows else None
+    price_open = opens[0] if opens else None
+    price_close = closes[-1] if closes else None
+
+    # Build per-exchange data structure
+    exchange_data = {}
+    for event in self.trade_buffer:
+      source = event.get("source")
+      if source:
+        if source not in exchange_data:
+          exchange_data[source] = {}
+
+        # Store latest value for each field
+        if "price" in event:
+          exchange_data[source]["price"] = event["price"]
+        if event.get("bid") is not None:
+          exchange_data[source]["bid"] = event["bid"]
+        if event.get("ask") is not None:
+          exchange_data[source]["ask"] = event["ask"]
+        if event.get("high") is not None:
+          exchange_data[source]["high"] = event["high"]
+        if event.get("low") is not None:
+          exchange_data[source]["low"] = event["low"]
+        if event.get("open") is not None:
+          exchange_data[source]["open"] = event["open"]
+        if event.get("close") is not None:
+          exchange_data[source]["close"] = event["close"]
+        if "qty" in event:
+          exchange_data[source]["volume"] = event["qty"]
 
     # Count tweets and custom events
     tweets_count = len(self.tweet_buffer)
     custom_count = len(self.custom_buffer)
 
-    # Aggregate on-chain events (treat custom buffer as onchain for now)
-    # In future: separate onchain_buffer from custom_buffer
+    # Aggregate on-chain events
     onchain_count = len(self.custom_buffer)
     onchain_values = [
-      e.get("value", 0) 
-      for e in self.custom_buffer 
+      e.get("value", 0)
+      for e in self.custom_buffer
       if e.get("value") is not None
     ]
     onchain_value_sum = sum(onchain_values) if onchain_values else None
@@ -112,6 +149,12 @@ class ThreeSourcePipeline:
       window_start=self.last_flush,
       window_end=now,
       price_avg=price_avg,
+      price_high=price_high,
+      price_low=price_low,
+      price_open=price_open,
+      price_close=price_close,
+      bid_avg=bid_avg,
+      ask_avg=ask_avg,
       volume_sum=volume_sum,
       tweets=tweets_count,
       onchain_count=onchain_count,
@@ -121,6 +164,7 @@ class ThreeSourcePipeline:
         "trades": len(self.trade_buffer),
         "sources": list(set(e.get("source") for e in self.trade_buffer)),
         "interval_sec": self.interval_sec,
+        "exchange_data": exchange_data,  # Per-exchange breakdown
       },
     )
 

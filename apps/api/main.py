@@ -6,6 +6,8 @@ import os
 from contextlib import asynccontextmanager
 from typing import Any
 from fastapi import FastAPI, HTTPException
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from apps.compiler import compile_spec, generate_stream_id
 from apps.runtime import StreamRuntime
@@ -58,6 +60,12 @@ class StreamInfo(BaseModel):
 
 @app.get("/")
 async def root():
+  """Serve the UI."""
+  return FileResponse("/app/apps/api/static/index.html")
+
+
+@app.get("/health")
+async def health():
   """Health check endpoint."""
   return {"status": "ok", "service": "bond"}
 

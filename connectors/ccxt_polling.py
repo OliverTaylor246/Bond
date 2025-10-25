@@ -9,7 +9,7 @@ import ccxt
 from engine.schemas import TradeEvent
 
 
-EXCHANGES = ["binance", "okx", "bybit"]
+EXCHANGES = ["kraken", "kucoin"]  # coinbase requires API keys
 
 
 async def ccxt_poll_stream(
@@ -41,7 +41,17 @@ async def ccxt_poll_stream(
           price=ticker["last"],
           qty=ticker.get("baseVolume", 0.0),
         )
-        yield evt.model_dump()
+
+        # Add extended fields to event dict
+        evt_dict = evt.model_dump()
+        evt_dict["bid"] = ticker.get("bid")
+        evt_dict["ask"] = ticker.get("ask")
+        evt_dict["high"] = ticker.get("high")
+        evt_dict["low"] = ticker.get("low")
+        evt_dict["open"] = ticker.get("open")
+        evt_dict["close"] = ticker.get("close")
+
+        yield evt_dict
 
       except Exception as e:
         # Silently skip errors for robustness

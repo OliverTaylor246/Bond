@@ -71,16 +71,32 @@ class AggregatedEvent(BaseModel):
     - onchain_count: Count of on-chain events in window
     - onchain_value_sum: Sum of on-chain event values in window
     - window_start/window_end: Optional window boundaries
+
+  v0.3 additions:
+    - Extended CCXT fields: bid, ask, high, low, open, close
   """
   ts: datetime
   window_start: Optional[datetime] = None
   window_end: Optional[datetime] = None
+
+  # Price fields
   price_avg: Optional[float] = None
+  price_high: Optional[float] = None
+  price_low: Optional[float] = None
+  price_open: Optional[float] = None
+  price_close: Optional[float] = None
+  bid_avg: Optional[float] = None
+  ask_avg: Optional[float] = None
+
+  # Volume
   volume_sum: Optional[float] = None
+
+  # Social & on-chain
   tweets: int = 0
   onchain_count: int = 0
   onchain_value_sum: Optional[float] = None
   custom_count: int = 0
+
   raw_data: dict[str, Any] = Field(default_factory=dict)
 
 

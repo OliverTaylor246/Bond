@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bond - Custom Stream Builder</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      padding: 20px;
+    }
+    .container { max-width: 1200px; margin: 0 auto; }
+    h1 {
+      color: white;
+      text-align: center;
+      margin-bottom: 30px;
+      font-size: 2.5em;
+    }
+    .builder-card {
+      background: white;
+      border-radius: 12px;
+      padding: 30px;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+      margin-bottom: 20px;
+    }
+    .section {
+      margin-bottom: 30px;
+      padding-bottom: 30px;
+      border-bottom: 2px solid #f0f0f0;
+    }
+    .section:last-child { border-bottom: none; }
+    .section-title {
+      font-size: 20px;
+      font-weight: 700;
+      color: #333;
+      margin-bottom: 15px;
+    }
+    .form-group { margin-bottom: 20px; }
+    select {
+      width: 100%;
+      padding: 12px;
+      border: 2px solid #e0e0e0;
+      border-radius: 8px;
+      font-size: 16px;
+    }
+    select:focus {
+      outline: none;
+      border-color: #667eea;
+    }
+    .exchange-buttons {
+      display: flex;
+      gap: 15px;
+      flex-wrap: wrap;
+    }
+    .add-exchange-btn {
+      background: #667eea;
+      color: white;
+      border: none;
+      padding: 12px 24px;
+      border-radius: 8px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .add-exchange-btn:hover {
+      background: #5568d3;
+      transform: translateY(-2px);
+    }
+    .exchange-card {
+      background: #f8f9fa;
+      border: 2px solid #667eea;
+      border-radius: 12px;
+      padding: 20px;
+      margin-top: 15px;
+      position: relative;
+    }
+    .exchange-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 15px;
+    }
+    .exchange-name {
+      font-size: 18px;
+      font-weight: 700;
+      color: #667eea;
+    }
+    .remove-btn {
+      background: #dc3545;
+      color: white;
+      border: none;
+      padding: 6px 12px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    .remove-btn:hover {
+      background: #c82333;
+    }
+    .fields-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+      gap: 12px;
+    }
+    .field-item {
+      background: white;
+      padding: 10px;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .field-item:hover {
+      background: #e9ecef;
+    }
+    .field-item input[type="checkbox"] {
+      cursor: pointer;
+    }
+    .field-item label {
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 500;
+    }
+    button[type="submit"] {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      border: none;
+      padding: 15px 30px;
+      border-radius: 8px;
+      font-size: 18px;
+      font-weight: 600;
+      cursor: pointer;
+      width: 100%;
+      transition: transform 0.2s;
+    }
+    button[type="submit"]:hover {
+      transform: translateY(-2px);
+    }
+    .output {
+      background: #1e1e1e;
+      color: #00ff00;
+      border-radius: 8px;
+      padding: 20px;
+      margin-top: 20px;
+      font-family: 'Courier New', monospace;
+      font-size: 14px;
+      max-height: 300px;
+      overflow-y: auto;
+      display: none;
+    }
+    .stream-data {
+      background: white;
+      border-radius: 12px;
+      padding: 30px;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+      display: none;
+    }
+    .stream-data.active { display: block; }
+    .data-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      gap: 15px;
+      margin-top: 20px;
+    }
+    .data-item {
+      background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+      padding: 20px;
+      border-radius: 8px;
+      border-left: 4px solid #667eea;
+    }
+    .data-item.loading {
+      opacity: 0.6;
+    }
+    .data-label {
+      font-size: 11px;
+      color: #666;
+      text-transform: uppercase;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+    .data-value {
+      font-size: 24px;
+      font-weight: 700;
+      color: #333;
+    }
+    .data-value.waiting {
+      font-size: 16px;
+      color: #999;
+      font-style: italic;
+    }
+    .hidden { display: none; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🚀 Bond Custom Stream Builder</h1>
+
+    <div class="builder-card">
+      <form id="streamForm">
+
+        <!-- Symbol Selection -->
+        <div class="section">
+          <div class="section-title">1️⃣ Select Symbol</div>
+          <div class="form-group">
+            <select id="symbol" required>
+              <option value="BTC">Bitcoin (BTC)</option>
+              <option value="ETH">Ethereum (ETH)</option>
+              <option value="SOL">Solana (SOL)</option>
+              <option value="AVAX">Avalanche (AVAX)</option>
+              <option value="MATIC">Polygon (MATIC)</option>
+              <option value="LINK">Chainlink (LINK)</option>
+              <option value="UNI">Uniswap (UNI)</option>
+              <option value="DOGE">Dogecoin (DOGE)</option>
+              <option value="ADA">Cardano (ADA)</option>
+              <option value="DOT">Polkadot (DOT)</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Exchange Selection -->
+        <div class="section">
+          <div class="section-title">2️⃣ Add Exchanges & Select Fields</div>
+          <div class="exchange-buttons">
+            <button type="button" class="add-exchange-btn" onclick="addExchange('kraken')">+ Add Kraken</button>
+            <button type="button" class="add-exchange-btn" onclick="addExchange('kucoin')">+ Add KuCoin</button>
+          </div>
+          <div id="exchangesContainer"></div>
+        </div>
+
+        <!-- Additional Sources -->
+        <div class="section">
+          <div class="section-title">3️⃣ Additional Sources (Optional)</div>
+          <div class="fields-grid">
+            <div class="field-item" onclick="toggleCheckbox('source_twitter')">
+              <input type="checkbox" id="source_twitter">
+              <label>🐦 Twitter/X</label>
+            </div>
+            <div class="field-item" onclick="toggleCheckbox('source_onchain')">
+              <input type="checkbox" id="source_onchain">
+              <label>⛓️ On-Chain</label>
+            </div>
+            <div class="field-item" onclick="toggleCheckbox('source_liq')">
+              <input type="checkbox" id="source_liq">
+              <label>📉 Liquidations</label>
+            </div>
+          </div>
+        </div>
+
+        <!-- Interval -->
+        <div class="section">
+          <div class="section-title">4️⃣ Update Interval</div>
+          <div class="form-group">
+            <select id="interval" required>
+              <option value="1">1 second</option>
+              <option value="2">2 seconds</option>
+              <option value="3">3 seconds</option>
+              <option value="5" selected>5 seconds</option>
+              <option value="10">10 seconds</option>
+              <option value="15">15 seconds</option>
+              <option value="30">30 seconds</option>
+            </select>
+          </div>
+        </div>
+
+        <button type="submit">🚀 Create Stream</button>
+      </form>
+
+      <div class="output" id="output"></div>
+    </div>
+
+    <div class="stream-data" id="streamData">
+      <h2>📊 Live Stream Data</h2>
+      <div class="data-grid" id="dataGrid"></div>
+    </div>
+  </div>
+
+  <script>
+    let ws = null;
+    const exchanges = new Map();
+    const currentConfig = [];
+    const availableFields = [
+      { id: 'price', label: '💰 Last Price' },
+      { id: 'bid', label: '🔵 Bid' },
+      { id: 'ask', label: '🔴 Ask' },
+      { id: 'high', label: '📈 24h High' },
+      { id: 'low', label: '📉 24h Low' },
+      { id: 'open', label: '🌅 Open' },
+      { id: 'close', label: '🌆 Close' },
+      { id: 'volume', label: '📊 Volume' }
+    ];
+
+    function toggleCheckbox(id) {
+      const cb = document.getElementById(id);
+      cb.checked = !cb.checked;
+    }
+
+    function addExchange(exchangeName) {
+      if (exchanges.has(exchangeName)) {
+        alert(`${exchangeName} already added!`);
+        return;
+      }
+
+      const container = document.getElementById('exchangesContainer');
+      const exchangeId = `exchange_${exchangeName}`;
+
+      const exchangeCard = document.createElement('div');
+      exchangeCard.className = 'exchange-card';
+      exchangeCard.id = exchangeId;
+
+      let fieldsHTML = availableFields.map(field => `
+        <div class="field-item" onclick="toggleCheckbox('${exchangeName}_${field.id}')">
+          <input type="checkbox" id="${exchangeName}_${field.id}" data-exchange="${exchangeName}" data-field="${field.id}">
+          <label for="${exchangeName}_${field.id}">${field.label}</label>
+        </div>
+      `).join('');
+
+      exchangeCard.innerHTML = `
+        <div class="exchange-header">
+          <div class="exchange-name">🔵 ${exchangeName.toUpperCase()}</div>
+          <button type="button" class="remove-btn" onclick="removeExchange('${exchangeName}')">Remove</button>
+        </div>
+        <div class="fields-grid">
+          ${fieldsHTML}
+        </div>
+      `;
+
+      container.appendChild(exchangeCard);
+      exchanges.set(exchangeName, new Set());
+    }
+
+    function removeExchange(exchangeName) {
+      const exchangeCard = document.getElementById(`exchange_${exchangeName}`);
+      if (exchangeCard) {
+        exchangeCard.remove();
+        exchanges.delete(exchangeName);
+      }
+    }
+
+    document.getElementById('streamForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+
+      const symbol = document.getElementById('symbol').value;
+      const interval = document.getElementById('interval').value;
+
+      // Collect exchange configurations
+      const exchangeConfigs = [];
+      exchanges.forEach((fields, exchangeName) => {
+        const selectedFields = [];
+        availableFields.forEach(field => {
+          const checkbox = document.getElementById(`${exchangeName}_${field.id}`);
+          if (checkbox && checkbox.checked) {
+            selectedFields.push(field.id);
+          }
+        });
+
+        if (selectedFields.length > 0) {
+          exchangeConfigs.push({
+            exchange: exchangeName,
+            fields: selectedFields
+          });
+        }
+      });
+
+      if (exchangeConfigs.length === 0) {
+        alert('Please add at least one exchange and select fields');
+        return;
+      }
+
+      // Store config for display initialization
+      currentConfig.length = 0;
+      currentConfig.push(...exchangeConfigs);
+
+      // Build spec
+      const spec = {
+        sources: exchangeConfigs.map(config => ({
+          type: 'ccxt',
+          exchange: config.exchange,
+          fields: config.fields,
+          symbols: [`${symbol}/USDT`]
+        })),
+        interval_sec: parseInt(interval),
+        symbols: [`${symbol}/USDT`]
+      };
+
+      // Add additional sources
+      if (document.getElementById('source_twitter').checked) {
+        spec.sources.push({ type: 'twitter', symbols: [`${symbol}/USDT`] });
+      }
+      if (document.getElementById('source_onchain').checked) {
+        spec.sources.push({ type: 'onchain', chain: 'sol', event_types: ['tx', 'transfer'] });
+      }
+      if (document.getElementById('source_liq').checked) {
+        spec.sources.push({ type: 'custom', mode: 'mock_liq' });
+      }
+
+      const output = document.getElementById('output');
+      output.style.display = 'block';
+      output.innerHTML = 'Creating stream...\n';
+      exchangeConfigs.forEach(config => {
+        output.innerHTML += `${config.exchange}: ${config.fields.join(', ')}\n`;
+      });
+
+      try {
+        const response = await fetch('/v1/streams', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ spec })
+        });
+
+        const data = await response.json();
+        output.innerHTML += `\n✅ Stream created: ${data.stream_id}\n`;
+        output.innerHTML += `Connecting...\n`;
+
+        // Initialize display with all selected fields
+        initializeDisplay(exchangeConfigs);
+
+        if (ws) ws.close();
+
+        const wsUrl = data.ws_url.replace('localhost', window.location.hostname);
+        ws = new WebSocket(wsUrl);
+
+        ws.onopen = () => {
+          output.innerHTML += '✅ Connected!\n';
+          document.getElementById('streamData').classList.add('active');
+        };
+
+        ws.onmessage = (event) => {
+          const streamEvent = JSON.parse(event.data);
+          updateDataDisplay(streamEvent);
+        };
+
+        ws.onerror = () => output.innerHTML += '❌ Error\n';
+        ws.onclose = () => output.innerHTML += 'Closed\n';
+
+      } catch (error) {
+        output.innerHTML += `❌ ${error.message}\n`;
+      }
+    });
+
+    function initializeDisplay(exchangeConfigs) {
+      const dataGrid = document.getElementById('dataGrid');
+      let html = '';
+
+      // Create all tiles upfront with "waiting" state
+      exchangeConfigs.forEach(config => {
+        config.fields.forEach(field => {
+          const fieldLabel = availableFields.find(f => f.id === field)?.label || field;
+          html += `
+            <div class="data-item" id="tile_${config.exchange}_${field}">
+              <div class="data-label">${config.exchange.toUpperCase()} - ${fieldLabel}</div>
+              <div class="data-value waiting">Waiting for data...</div>
+            </div>
+          `;
+        });
+      });
+
+      // Additional sources
+      if (document.getElementById('source_twitter').checked) {
+        html += `
+          <div class="data-item" id="tile_tweets">
+            <div class="data-label">TWEETS</div>
+            <div class="data-value waiting">0</div>
+          </div>
+        `;
+      }
+      if (document.getElementById('source_onchain').checked) {
+        html += `
+          <div class="data-item" id="tile_onchain">
+            <div class="data-label">ON-CHAIN</div>
+            <div class="data-value waiting">0</div>
+          </div>
+        `;
+      }
+
+      dataGrid.innerHTML = html;
+    }
+
+    function updateDataDisplay(event) {
+      // Update per-exchange data
+      if (event.raw_data && event.raw_data.exchange_data) {
+        currentConfig.forEach(config => {
+          const exchangeData = event.raw_data.exchange_data[config.exchange];
+          if (exchangeData) {
+            config.fields.forEach(field => {
+              const tileId = `tile_${config.exchange}_${field}`;
+              const tile = document.getElementById(tileId);
+              if (tile) {
+                const valueDiv = tile.querySelector('.data-value');
+                const value = exchangeData[field];
+                if (value !== undefined && value !== null) {
+                  valueDiv.classList.remove('waiting');
+                  valueDiv.textContent = typeof value === 'number' ? '$' + value.toFixed(2) : value;
+                }
+              }
+            });
+          }
+        });
+      }
+
+      // Update additional sources
+      const tweetsTile = document.getElementById('tile_tweets');
+      if (tweetsTile && event.tweets !== undefined) {
+        const valueDiv = tweetsTile.querySelector('.data-value');
+        valueDiv.classList.remove('waiting');
+        valueDiv.textContent = event.tweets;
+      }
+
+      const onchainTile = document.getElementById('tile_onchain');
+      if (onchainTile && event.onchain_count !== undefined) {
+        const valueDiv = onchainTile.querySelector('.data-value');
+        valueDiv.classList.remove('waiting');
+        valueDiv.textContent = event.onchain_count;
+      }
+    }
+  </script>
+</body>
+</html>
