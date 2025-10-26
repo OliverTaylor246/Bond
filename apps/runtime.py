@@ -8,6 +8,7 @@ from engine.schemas import StreamSpec
 from engine.pipeline_three import ThreeSourcePipeline
 from engine.dispatch import RedisDispatcher
 from connectors.ccxt_polling import ccxt_poll_stream
+from connectors.ccxt_ws import ccxt_ws_stream
 from connectors.x_stream import x_stream
 from connectors.custom_ws import custom_stream
 from connectors.onchain_grpc import onchain_stream
@@ -59,21 +60,76 @@ class StreamRuntime:
       stream_id: Stream identifier
       spec: Stream specification
     """
+    print(f"[runtime] ====== _run_stream started for {stream_id} ======", flush=True)
     # Extract config from spec
     interval = spec.interval_sec
     symbols = spec.symbols
+    print(f"[runtime] interval={interval}, symbols={symbols}", flush=True)
 
     # Determine which sources to activate
+    print(f"[runtime] About to extract source_types", flush=True)
     source_types = {s["type"] for s in spec.sources}
+    print(f"[runtime] source_types={source_types}", flush=True)
+    print(f"[runtime] Creating source streams...", flush=True)
 
     # Create source streams
+    print(f"[runtime] After setup, creating sources", flush=True)
     ccxt_src = None
     twitter_src = None
     custom_src = None
+    print(f"[runtime] Initialized sources to None", flush=True)
 
+    print(f"[runtime] Checking if ccxt in source_types: {'ccxt' in source_types}", flush=True)
     if "ccxt" in source_types:
-      symbol = symbols[0] if symbols else "BTC/USDT"
-      ccxt_src = ccxt_poll_stream(symbol, interval)
+      print(f"[runtime] YES, ccxt is in source_types", flush=True)
+      try:
+        symbol = symbols[0] if symbols else "BTC/USDT"
+        print(f"[runtime] CCXT source detected, symbol: {symbol}", flush=True)
+      except Exception as e:
+        print(f"[runtime] ERROR getting symbol: {e}", flush=True)
+        import traceback
+        traceback.print_exc()
+        raise
+
+      # Collect all exchanges from CCXT sources
+      exchanges_to_use = []
+      for source in spec.sources:
+        if source.get("type") == "ccxt" and source.get("exchange"):
+          exchanges_to_use.append(source["exchange"])
+
+      print(f"[runtime] Exchanges to use: {exchanges_to_use}")
+
+      # If multiple exchanges, merge their streams
+      if len(exchanges_to_use) > 1:
+        async def merged_ccxt_stream():
+          queue = asyncio.Queue()
+
+          async def pump_exchange(ex_name: str):
+            async for event in ccxt_ws_stream(symbol, ex_name):
+              await queue.put(event)
+
+          tasks = [asyncio.create_task(pump_exchange(ex)) for ex in exchanges_to_use]
+
+          try:
+            while True:
+              yield await queue.get()
+          finally:
+            for task in tasks:
+              task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+        ccxt_src = merged_ccxt_stream()
+        print(f"[runtime] Using merged WebSocket stream for {len(exchanges_to_use)} exchanges")
+      elif len(exchanges_to_use) == 1:
+        # Single exchange WebSocket
+        print(f"[runtime] About to call ccxt_ws_stream({symbol}, {exchanges_to_use[0]})", flush=True)
+        ccxt_src = ccxt_ws_stream(symbol, exchanges_to_use[0])
+        print(f"[runtime] Created WebSocket stream generator: {ccxt_src}", flush=True)
+        print(f"[runtime] Using single WebSocket stream: {exchanges_to_use[0]}")
+      else:
+        # Default to kraken WebSocket
+        ccxt_src = ccxt_ws_stream(symbol, "kraken")
+        print(f"[runtime] Using default WebSocket stream: kraken")
 
     if "twitter" in source_types:
       symbol = symbols[0].split("/")[0] if symbols else "BTC"
@@ -96,7 +152,10 @@ class StreamRuntime:
       custom_src = custom_stream(mode, {"symbol": symbols[0] if symbols else "BTC/USDT", "interval": interval})
 
     # If no sources specified, use all three (ccxt + twitter + onchain)
+    print(f"[runtime] Before fallback check: ccxt_src={ccxt_src}, twitter_src={twitter_src}, custom_src={custom_src}", flush=True)
+    print(f"[runtime] any([ccxt_src, twitter_src, custom_src]) = {any([ccxt_src, twitter_src, custom_src])}", flush=True)
     if not any([ccxt_src, twitter_src, custom_src]):
+      print(f"[runtime] FALLBACK: No sources set, using defaults with REST polling!", flush=True)
       symbol = symbols[0] if symbols else "BTC/USDT"
       ccxt_src = ccxt_poll_stream(symbol, interval)
       twitter_src = x_stream(symbol.split("/")[0], interval=interval)
@@ -118,12 +177,17 @@ class StreamRuntime:
 
     # Run pipeline (will block until cancelled)
     try:
+      print(f"[runtime] Starting pipeline ingest for {stream_id}")
+      print(f"[runtime] Passing to pipeline: ccxt_src={ccxt_src}, twitter_src={twitter_src}, custom_src={custom_src}", flush=True)
       await pipeline.ingest(ccxt_src, twitter_src, custom_src)
     except asyncio.CancelledError:
       # Clean shutdown
+      print(f"[runtime] Stream {stream_id} cancelled")
       pass
     except Exception as e:
       print(f"[runtime] Stream {stream_id} error: {e}")
+      import traceback
+      traceback.print_exc()
     finally:
       # Cleanup
       if stream_id in self.active_streams:

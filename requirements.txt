@@ -8,6 +8,8 @@ pydantic==2.5.3
 
 # Data sources
 ccxt==4.2.25
+ccxt[pro]==4.2.25
+aiohttp==3.8.6
 websockets==12.0
 
 # Redis

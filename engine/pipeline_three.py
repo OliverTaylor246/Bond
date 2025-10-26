@@ -58,8 +58,18 @@ class ThreeSourcePipeline:
 
   async def _ingest_trades(self, stream: AsyncIterator[dict]) -> None:
     """Consume trade events and buffer them."""
-    async for event in stream:
-      self.trade_buffer.append(event)
+    try:
+      print(f"[pipeline] Starting trade ingestion for {self.stream_id}", flush=True)
+      print(f"[pipeline] Stream object: {stream}", flush=True)
+      print(f"[pipeline] About to start async for loop...", flush=True)
+      async for event in stream:
+        print(f"[pipeline] Received trade event: {event.get('source')} price={event.get('price')}", flush=True)
+        self.trade_buffer.append(event)
+    except Exception as e:
+      print(f"[pipeline] ERROR in _ingest_trades: {e}", flush=True)
+      import traceback
+      traceback.print_exc()
+      raise
 
   async def _ingest_tweets(self, stream: AsyncIterator[dict]) -> None:
     """Consume tweet events and buffer them."""
