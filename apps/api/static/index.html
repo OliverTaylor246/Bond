@@ -3,281 +3,673 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Bond - Custom Stream Builder</title>
+  <title>Bond Terminal - Real-time Market Intelligence</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
+    :root {
+      --bg-primary: #0a0e17;
+      --bg-secondary: #111827;
+      --bg-tertiary: #1a1f2e;
+      --bg-card: #151b28;
+      --border-color: #1f2937;
+      --accent-blue: #3b82f6;
+      --accent-green: #10b981;
+      --accent-red: #ef4444;
+      --accent-purple: #8b5cf6;
+      --text-primary: #f9fafb;
+      --text-secondary: #9ca3af;
+      --text-muted: #6b7280;
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
     body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: var(--bg-primary);
+      color: var(--text-primary);
       min-height: 100vh;
-      padding: 20px;
+      overflow-x: hidden;
     }
-    .container { max-width: 1200px; margin: 0 auto; }
-    h1 {
-      color: white;
-      text-align: center;
-      margin-bottom: 30px;
-      font-size: 2.5em;
-    }
-    .builder-card {
-      background: white;
-      border-radius: 12px;
-      padding: 30px;
-      box-shadow: 0 10px 40px rgba(0,0,0,0.2);
-      margin-bottom: 20px;
-    }
-    .section {
-      margin-bottom: 30px;
-      padding-bottom: 30px;
-      border-bottom: 2px solid #f0f0f0;
-    }
-    .section:last-child { border-bottom: none; }
-    .section-title {
-      font-size: 20px;
-      font-weight: 700;
-      color: #333;
-      margin-bottom: 15px;
-    }
-    .form-group { margin-bottom: 20px; }
-    select {
-      width: 100%;
-      padding: 12px;
-      border: 2px solid #e0e0e0;
-      border-radius: 8px;
-      font-size: 16px;
-    }
-    select:focus {
-      outline: none;
-      border-color: #667eea;
-    }
-    .exchange-buttons {
+
+    /* Header / Navigation */
+    .header {
+      background: var(--bg-secondary);
+      border-bottom: 1px solid var(--border-color);
+      padding: 0 32px;
+      height: 64px;
       display: flex;
-      gap: 15px;
-      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      backdrop-filter: blur(10px);
     }
-    .add-exchange-btn {
-      background: #667eea;
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-size: 24px;
+      font-weight: 700;
+      background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      letter-spacing: -0.5px;
+    }
+
+    .header-stats {
+      display: flex;
+      gap: 32px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 13px;
+    }
+
+    .stat-item {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .stat-label {
+      color: var(--text-muted);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .stat-value {
+      color: var(--text-primary);
+      font-weight: 600;
+    }
+
+    /* Main Layout */
+    .main-container {
+      display: grid;
+      grid-template-columns: 380px 1fr;
+      height: calc(100vh - 64px);
+      overflow: hidden;
+    }
+
+    /* Left Panel - Configuration */
+    .config-panel {
+      background: var(--bg-secondary);
+      border-right: 1px solid var(--border-color);
+      overflow-y: auto;
+      padding: 24px;
+    }
+
+    .config-panel::-webkit-scrollbar {
+      width: 8px;
+    }
+
+    .config-panel::-webkit-scrollbar-track {
+      background: var(--bg-tertiary);
+    }
+
+    .config-panel::-webkit-scrollbar-thumb {
+      background: var(--border-color);
+      border-radius: 4px;
+    }
+
+    .panel-section {
+      margin-bottom: 28px;
+      padding-bottom: 28px;
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    .panel-section:last-child {
+      border-bottom: none;
+    }
+
+    .section-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 16px;
+      color: var(--text-primary);
+      font-size: 13px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .section-number {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 20px;
+      height: 20px;
+      background: var(--accent-blue);
       color: white;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 700;
+    }
+
+    /* Form Elements */
+    select, input[type="number"], input[type="text"] {
+      width: 100%;
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border-color);
+      color: var(--text-primary);
+      padding: 10px 12px;
+      border-radius: 6px;
+      font-size: 14px;
+      font-family: 'Inter', sans-serif;
+      transition: all 0.2s;
+    }
+
+    select:focus, input:focus {
+      outline: none;
+      border-color: var(--accent-blue);
+      background: var(--bg-card);
+    }
+
+    select option {
+      background: var(--bg-tertiary);
+      color: var(--text-primary);
+    }
+
+    /* Buttons */
+    .btn {
+      padding: 10px 16px;
       border: none;
-      padding: 12px 24px;
-      border-radius: 8px;
-      font-size: 16px;
+      border-radius: 6px;
+      font-size: 13px;
       font-weight: 600;
       cursor: pointer;
       transition: all 0.2s;
+      font-family: 'Inter', sans-serif;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
     }
-    .add-exchange-btn:hover {
-      background: #5568d3;
-      transform: translateY(-2px);
+
+    .btn-primary {
+      background: var(--accent-blue);
+      color: white;
     }
+
+    .btn-primary:hover {
+      background: #2563eb;
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+    }
+
+    .btn-success {
+      background: var(--accent-green);
+      color: white;
+      width: 100%;
+      padding: 14px;
+      font-size: 14px;
+      margin-top: 8px;
+    }
+
+    .btn-success:hover {
+      background: #059669;
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+    }
+
+    .btn-secondary {
+      background: var(--bg-tertiary);
+      color: var(--text-secondary);
+      border: 1px solid var(--border-color);
+    }
+
+    .btn-secondary:hover {
+      background: var(--bg-card);
+      border-color: var(--accent-blue);
+      color: var(--text-primary);
+    }
+
+    .btn-danger {
+      background: transparent;
+      color: var(--accent-red);
+      border: 1px solid var(--accent-red);
+      padding: 6px 12px;
+      font-size: 12px;
+    }
+
+    .btn-danger:hover {
+      background: var(--accent-red);
+      color: white;
+    }
+
+    /* Exchange Cards */
+    .exchange-buttons {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+    }
+
     .exchange-card {
-      background: #f8f9fa;
-      border: 2px solid #667eea;
-      border-radius: 12px;
-      padding: 20px;
-      margin-top: 15px;
-      position: relative;
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 16px;
+      margin-top: 12px;
     }
+
     .exchange-header {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      margin-bottom: 15px;
+      margin-bottom: 14px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--border-color);
     }
+
     .exchange-name {
-      font-size: 18px;
-      font-weight: 700;
-      color: #667eea;
-    }
-    .remove-btn {
-      background: #dc3545;
-      color: white;
-      border: none;
-      padding: 6px 12px;
-      border-radius: 6px;
-      cursor: pointer;
       font-size: 14px;
+      font-weight: 700;
+      color: var(--accent-blue);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
     }
-    .remove-btn:hover {
-      background: #c82333;
-    }
+
+    /* Field Selection */
     .fields-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-      gap: 12px;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 8px;
     }
+
     .field-item {
-      background: white;
-      padding: 10px;
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border-color);
+      padding: 8px 10px;
       border-radius: 6px;
       display: flex;
       align-items: center;
       gap: 8px;
       cursor: pointer;
-      transition: background 0.2s;
+      transition: all 0.2s;
     }
+
     .field-item:hover {
-      background: #e9ecef;
+      background: var(--bg-secondary);
+      border-color: var(--accent-blue);
     }
+
     .field-item input[type="checkbox"] {
       cursor: pointer;
+      accent-color: var(--accent-blue);
     }
+
     .field-item label {
       cursor: pointer;
-      font-size: 14px;
+      font-size: 12px;
+      color: var(--text-secondary);
       font-weight: 500;
     }
-    button[type="submit"] {
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      color: white;
-      border: none;
-      padding: 15px 30px;
-      border-radius: 8px;
-      font-size: 18px;
-      font-weight: 600;
-      cursor: pointer;
-      width: 100%;
-      transition: transform 0.2s;
-    }
-    button[type="submit"]:hover {
-      transform: translateY(-2px);
-    }
-    .output {
-      background: #1e1e1e;
-      color: #00ff00;
-      border-radius: 8px;
-      padding: 20px;
-      margin-top: 20px;
-      font-family: 'Courier New', monospace;
-      font-size: 14px;
-      max-height: 300px;
+
+    /* Right Panel - Data Display */
+    .data-panel {
+      background: var(--bg-primary);
       overflow-y: auto;
-      display: none;
+      padding: 24px;
     }
-    .stream-data {
-      background: white;
-      border-radius: 12px;
-      padding: 30px;
-      box-shadow: 0 10px 40px rgba(0,0,0,0.2);
-      display: none;
+
+    .data-panel::-webkit-scrollbar {
+      width: 8px;
     }
-    .stream-data.active { display: block; }
-    .data-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-      gap: 15px;
-      margin-top: 20px;
+
+    .data-panel::-webkit-scrollbar-track {
+      background: var(--bg-tertiary);
     }
-    .data-item {
-      background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
-      padding: 20px;
+
+    .data-panel::-webkit-scrollbar-thumb {
+      background: var(--border-color);
+      border-radius: 4px;
+    }
+
+    /* Performance Stats Bar */
+    .perf-stats {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-color);
       border-radius: 8px;
-      border-left: 4px solid #667eea;
+      padding: 20px 24px;
+      margin-bottom: 24px;
+      display: none;
     }
-    .data-item.loading {
-      opacity: 0.6;
+
+    .perf-stats.active {
+      display: block;
     }
-    .data-label {
+
+    .perf-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 24px;
+    }
+
+    .perf-item {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .perf-label {
       font-size: 11px;
-      color: #666;
+      color: var(--text-muted);
       text-transform: uppercase;
-      font-weight: 600;
-      margin-bottom: 8px;
+      letter-spacing: 0.5px;
     }
-    .data-value {
+
+    .perf-value {
       font-size: 24px;
       font-weight: 700;
-      color: #333;
+      font-family: 'JetBrains Mono', monospace;
+      color: var(--text-primary);
     }
-    .data-value.waiting {
-      font-size: 16px;
-      color: #999;
+
+    .perf-value.green { color: var(--accent-green); }
+    .perf-value.blue { color: var(--accent-blue); }
+    .perf-value.gray { color: var(--text-muted); }
+
+    /* Data Grid */
+    .data-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 16px;
+      display: none;
+    }
+
+    .data-grid.active {
+      display: grid;
+    }
+
+    .data-tile {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 20px;
+      transition: all 0.2s;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .data-tile::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 3px;
+      background: linear-gradient(90deg, var(--accent-blue), var(--accent-purple));
+      opacity: 0;
+      transition: opacity 0.2s;
+    }
+
+    .data-tile:hover {
+      border-color: var(--accent-blue);
+      transform: translateY(-2px);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    }
+
+    .data-tile:hover::before {
+      opacity: 1;
+    }
+
+    .tile-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 12px;
+    }
+
+    .tile-label {
+      font-size: 11px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      font-weight: 600;
+    }
+
+    .tile-source {
+      font-size: 10px;
+      color: var(--text-muted);
+      background: var(--bg-tertiary);
+      padding: 3px 8px;
+      border-radius: 4px;
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .tile-value {
+      font-size: 32px;
+      font-weight: 700;
+      font-family: 'JetBrains Mono', monospace;
+      color: var(--text-primary);
+      line-height: 1.2;
+    }
+
+    .tile-value.waiting {
+      font-size: 14px;
+      color: var(--text-muted);
       font-style: italic;
+      font-family: 'Inter', sans-serif;
     }
+
+    .tile-change {
+      font-size: 12px;
+      margin-top: 8px;
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .tile-change.positive { color: var(--accent-green); }
+    .tile-change.negative { color: var(--accent-red); }
+
+    /* Console Output */
+    .console {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 24px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      max-height: 200px;
+      overflow-y: auto;
+      display: none;
+      color: var(--accent-green);
+    }
+
+    .console.active {
+      display: block;
+    }
+
+    .console::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    .console::-webkit-scrollbar-track {
+      background: var(--bg-tertiary);
+    }
+
+    .console::-webkit-scrollbar-thumb {
+      background: var(--border-color);
+      border-radius: 3px;
+    }
+
+    /* Empty State */
+    .empty-state {
+      text-align: center;
+      padding: 80px 40px;
+      color: var(--text-muted);
+    }
+
+    .empty-state-icon {
+      font-size: 64px;
+      margin-bottom: 16px;
+      opacity: 0.3;
+    }
+
+    .empty-state-title {
+      font-size: 18px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      margin-bottom: 8px;
+    }
+
+    .empty-state-text {
+      font-size: 14px;
+      line-height: 1.6;
+    }
+
+    /* Utility */
     .hidden { display: none; }
+
+    .hint-text {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-top: 8px;
+      line-height: 1.5;
+    }
+
+    /* Input hints */
+    .input-hint {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-top: 6px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    /* Responsive */
+    @media (max-width: 1024px) {
+      .main-container {
+        grid-template-columns: 1fr;
+      }
+      .config-panel {
+        border-right: none;
+        border-bottom: 1px solid var(--border-color);
+        height: auto;
+        max-height: 60vh;
+      }
+      .perf-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+    }
   </style>
 </head>
 <body>
-  <div class="container">
-    <h1>🚀 Bond Custom Stream Builder</h1>
+  <!-- Header -->
+  <div class="header">
+    <div class="logo">
+      <span>⚡</span>
+      <span>BOND TERMINAL</span>
+    </div>
+    <div class="header-stats">
+      <div class="stat-item">
+        <div class="stat-label">Active Streams</div>
+        <div class="stat-value" id="headerStreamCount">0</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-label">Status</div>
+        <div class="stat-value" id="headerStatus">Ready</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-label">Latency</div>
+        <div class="stat-value" id="headerLatency">--ms</div>
+      </div>
+    </div>
+  </div>
 
-    <div class="builder-card">
+  <!-- Main Container -->
+  <div class="main-container">
+    <!-- Left Panel: Configuration -->
+    <div class="config-panel">
       <form id="streamForm">
-
         <!-- Symbol Selection -->
-        <div class="section">
-          <div class="section-title">1️⃣ Select Symbol</div>
-          <div class="form-group">
-            <select id="symbol" required>
-              <option value="BTC">Bitcoin (BTC)</option>
-              <option value="ETH">Ethereum (ETH)</option>
-              <option value="SOL">Solana (SOL)</option>
-              <option value="AVAX">Avalanche (AVAX)</option>
-              <option value="MATIC">Polygon (MATIC)</option>
-              <option value="LINK">Chainlink (LINK)</option>
-              <option value="UNI">Uniswap (UNI)</option>
-              <option value="DOGE">Dogecoin (DOGE)</option>
-              <option value="ADA">Cardano (ADA)</option>
-              <option value="DOT">Polkadot (DOT)</option>
-            </select>
+        <div class="panel-section">
+          <div class="section-header">
+            <div class="section-number">1</div>
+            <span>Market Symbol</span>
           </div>
+          <select id="symbol" required>
+            <option value="BTC">Bitcoin (BTC)</option>
+            <option value="ETH">Ethereum (ETH)</option>
+            <option value="SOL">Solana (SOL)</option>
+            <option value="AVAX">Avalanche (AVAX)</option>
+            <option value="MATIC">Polygon (MATIC)</option>
+            <option value="LINK">Chainlink (LINK)</option>
+            <option value="UNI">Uniswap (UNI)</option>
+            <option value="DOGE">Dogecoin (DOGE)</option>
+            <option value="ADA">Cardano (ADA)</option>
+            <option value="DOT">Polkadot (DOT)</option>
+          </select>
         </div>
 
         <!-- Exchange Selection -->
-        <div class="section">
-          <div class="section-title">2️⃣ Add Exchanges & Select Fields</div>
+        <div class="panel-section">
+          <div class="section-header">
+            <div class="section-number">2</div>
+            <span>Exchange Sources</span>
+          </div>
           <div class="exchange-buttons">
-            <button type="button" class="add-exchange-btn" onclick="addExchange('kraken')">+ Add Kraken</button>
-            <button type="button" class="add-exchange-btn" onclick="addExchange('kucoin')">+ Add KuCoin</button>
+            <button type="button" class="btn btn-secondary" onclick="addExchange('kraken')">+ Kraken</button>
+            <button type="button" class="btn btn-secondary" onclick="addExchange('kucoin')">+ KuCoin</button>
           </div>
           <div id="exchangesContainer"></div>
         </div>
 
-        <!-- Additional Sources -->
-        <div class="section">
-          <div class="section-title">3️⃣ Additional Sources (Optional)</div>
+        <!-- Additional Data Sources -->
+        <div class="panel-section">
+          <div class="section-header">
+            <div class="section-number">3</div>
+            <span>Additional Sources</span>
+          </div>
           <div class="fields-grid">
             <div class="field-item" onclick="toggleCheckbox('source_twitter')">
               <input type="checkbox" id="source_twitter">
-              <label>🐦 Twitter/X</label>
+              <label>Twitter/X</label>
             </div>
             <div class="field-item" onclick="toggleCheckbox('source_onchain')">
               <input type="checkbox" id="source_onchain">
-              <label>⛓️ On-Chain</label>
+              <label>On-Chain</label>
             </div>
             <div class="field-item" onclick="toggleCheckbox('source_liq')">
               <input type="checkbox" id="source_liq">
-              <label>📉 Liquidations</label>
+              <label>Liquidations</label>
             </div>
             <div class="field-item" onclick="toggleCheckbox('source_google_trends')">
               <input type="checkbox" id="source_google_trends">
-              <label>📈 Google Trends</label>
+              <label>Search Trends</label>
             </div>
           </div>
         </div>
 
-        <!-- Google Trends Configuration (shown when checked) -->
-        <div class="section hidden" id="googleTrendsConfig">
-          <div class="section-title">🔍 Google Trends Settings</div>
-          <div class="form-group">
-            <label for="trends_keywords" style="display: block; margin-bottom: 8px; color: #666; font-size: 14px;">
-              Keywords to track (comma-separated, max 5):
+        <!-- Google Trends Config -->
+        <div class="panel-section hidden" id="googleTrendsConfig">
+          <div class="section-header">
+            <span>🔍 Search Trends Configuration</span>
+          </div>
+          <div style="margin-bottom: 16px;">
+            <label for="trends_keywords" style="display: block; margin-bottom: 8px; color: var(--text-secondary); font-size: 12px; font-weight: 500;">
+              Keywords (comma-separated, max 5)
             </label>
             <input
               type="text"
               id="trends_keywords"
-              placeholder="e.g., bitcoin, ethereum, crypto"
-              style="width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 16px;"
+              placeholder="bitcoin, ethereum, crypto"
             >
-            <div style="margin-top: 8px; font-size: 13px; color: #666;">
-              💡 Leave blank to auto-use selected symbol
-            </div>
+            <div class="input-hint">💡 Leave blank to use selected symbol</div>
           </div>
-          <div class="form-group" style="margin-top: 15px;">
-            <label for="trends_timeframe" style="display: block; margin-bottom: 8px; color: #666; font-size: 14px;">
-              Timeframe:
+          <div>
+            <label for="trends_timeframe" style="display: block; margin-bottom: 8px; color: var(--text-secondary); font-size: 12px; font-weight: 500;">
+              Timeframe
             </label>
-            <select id="trends_timeframe" style="width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 16px;">
+            <select id="trends_timeframe">
               <option value="now 1-H">Last Hour</option>
               <option value="now 4-H">Last 4 Hours</option>
               <option value="now 1-d" selected>Last 24 Hours</option>
@@ -287,46 +679,65 @@
           </div>
         </div>
 
-        <!-- Interval -->
-        <div class="section">
-          <div class="section-title">4️⃣ Update Interval</div>
-          <div class="form-group">
-            <label for="interval" style="display: block; margin-bottom: 8px; color: #666; font-size: 14px;">
-              Enter interval in seconds (minimum 0.1 for real-time):
-            </label>
-            <input
-              type="number"
-              id="interval"
-              min="0.1"
-              step="0.1"
-              value="1"
-              required
-              style="width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 16px;"
-              placeholder="e.g., 0.5, 1, 2, 5"
-            >
-            <div style="margin-top: 8px; font-size: 13px; color: #666;">
-              💡 <strong>Tip:</strong> 0.1-0.5s = real-time (high CPU), 1-3s = balanced, 5s+ = low frequency
-            </div>
+        <!-- Update Interval -->
+        <div class="panel-section">
+          <div class="section-header">
+            <div class="section-number">4</div>
+            <span>Update Interval</span>
           </div>
+          <label for="interval" style="display: block; margin-bottom: 8px; color: var(--text-secondary); font-size: 12px; font-weight: 500;">
+            Seconds between updates
+          </label>
+          <input
+            type="number"
+            id="interval"
+            min="0.1"
+            step="0.1"
+            value="1"
+            required
+            placeholder="1.0"
+          >
+          <div class="input-hint">⚡ 0.1-0.5s = real-time | 1-3s = balanced | 5s+ = low frequency</div>
         </div>
 
-        <button type="submit">🚀 Create Stream</button>
+        <button type="submit" class="btn btn-success">⚡ Initialize Stream</button>
       </form>
-
-      <div class="output" id="output"></div>
     </div>
 
-    <div class="stream-data" id="streamData">
-      <h2>📊 Live Stream Data</h2>
-      <div id="updateStats" style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 20px; font-family: monospace;">
-        <div style="display: flex; gap: 30px; flex-wrap: wrap;">
-          <div>⚡ <strong>Update Speed:</strong> <span id="updateSpeed">--</span>s</div>
-          <div>📈 <strong>Updates:</strong> <span id="updateCount">0</span></div>
-          <div>⏱️ <strong>Configured Interval:</strong> <span id="configInterval">--</span>s</div>
-          <div>🎯 <strong>Status:</strong> <span id="updateStatus">Connecting...</span></div>
+    <!-- Right Panel: Data Display -->
+    <div class="data-panel">
+      <div class="console" id="console"></div>
+
+      <div class="perf-stats" id="perfStats">
+        <div class="perf-grid">
+          <div class="perf-item">
+            <div class="perf-label">Update Speed</div>
+            <div class="perf-value green" id="updateSpeed">--</div>
+          </div>
+          <div class="perf-item">
+            <div class="perf-label">Total Updates</div>
+            <div class="perf-value blue" id="updateCount">0</div>
+          </div>
+          <div class="perf-item">
+            <div class="perf-label">Configured Interval</div>
+            <div class="perf-value gray" id="configInterval">--s</div>
+          </div>
+          <div class="perf-item">
+            <div class="perf-label">Stream Status</div>
+            <div class="perf-value" id="updateStatus" style="font-size: 16px;">Standby</div>
+          </div>
         </div>
       </div>
+
       <div class="data-grid" id="dataGrid"></div>
+
+      <div class="empty-state" id="emptyState">
+        <div class="empty-state-icon">📊</div>
+        <div class="empty-state-title">No Active Stream</div>
+        <div class="empty-state-text">
+          Configure your data sources in the left panel and initialize a stream to begin receiving real-time market intelligence.
+        </div>
+      </div>
     </div>
   </div>
 
@@ -335,21 +746,20 @@
     const exchanges = new Map();
     const currentConfig = [];
     const availableFields = [
-      { id: 'price', label: '💰 Last Price' },
-      { id: 'bid', label: '🔵 Bid' },
-      { id: 'ask', label: '🔴 Ask' },
-      { id: 'high', label: '📈 24h High' },
-      { id: 'low', label: '📉 24h Low' },
-      { id: 'open', label: '🌅 Open' },
-      { id: 'close', label: '🌆 Close' },
-      { id: 'volume', label: '📊 Volume' }
+      { id: 'price', label: 'Last Price' },
+      { id: 'bid', label: 'Bid' },
+      { id: 'ask', label: 'Ask' },
+      { id: 'high', label: '24h High' },
+      { id: 'low', label: '24h Low' },
+      { id: 'open', label: 'Open' },
+      { id: 'close', label: 'Close' },
+      { id: 'volume', label: 'Volume' }
     ];
 
     function toggleCheckbox(id) {
       const cb = document.getElementById(id);
       cb.checked = !cb.checked;
 
-      // Show/hide Google Trends config when checkbox toggled
       if (id === 'source_google_trends') {
         const config = document.getElementById('googleTrendsConfig');
         if (cb.checked) {
@@ -362,16 +772,14 @@
 
     function addExchange(exchangeName) {
       if (exchanges.has(exchangeName)) {
-        alert(`${exchangeName} already added!`);
+        alert(`${exchangeName} already added`);
         return;
       }
 
       const container = document.getElementById('exchangesContainer');
-      const exchangeId = `exchange_${exchangeName}`;
-
       const exchangeCard = document.createElement('div');
       exchangeCard.className = 'exchange-card';
-      exchangeCard.id = exchangeId;
+      exchangeCard.id = `exchange_${exchangeName}`;
 
       let fieldsHTML = availableFields.map(field => `
         <div class="field-item" onclick="toggleCheckbox('${exchangeName}_${field.id}')">
@@ -382,8 +790,8 @@
 
       exchangeCard.innerHTML = `
         <div class="exchange-header">
-          <div class="exchange-name">🔵 ${exchangeName.toUpperCase()}</div>
-          <button type="button" class="remove-btn" onclick="removeExchange('${exchangeName}')">Remove</button>
+          <div class="exchange-name">${exchangeName}</div>
+          <button type="button" class="btn btn-danger" onclick="removeExchange('${exchangeName}')">Remove</button>
         </div>
         <div class="fields-grid">
           ${fieldsHTML}
@@ -408,7 +816,6 @@
       const symbol = document.getElementById('symbol').value;
       const interval = document.getElementById('interval').value;
 
-      // Collect exchange configurations
       const exchangeConfigs = [];
       exchanges.forEach((fields, exchangeName) => {
         const selectedFields = [];
@@ -432,11 +839,9 @@
         return;
       }
 
-      // Store config for display initialization
       currentConfig.length = 0;
       currentConfig.push(...exchangeConfigs);
 
-      // Build spec
       const spec = {
         sources: exchangeConfigs.map(config => ({
           type: 'ccxt',
@@ -448,7 +853,6 @@
         symbols: [`${symbol}/USDT`]
       };
 
-      // Add additional sources
       if (document.getElementById('source_twitter').checked) {
         spec.sources.push({ type: 'twitter', symbols: [`${symbol}/USDT`] });
       }
@@ -461,7 +865,6 @@
       if (document.getElementById('source_google_trends').checked) {
         const keywordsInput = document.getElementById('trends_keywords').value;
         const timeframe = document.getElementById('trends_timeframe').value;
-
         const keywords = keywordsInput.trim()
           ? keywordsInput.split(',').map(k => k.trim().toLowerCase())
           : [symbol.toLowerCase()];
@@ -473,12 +876,12 @@
         });
       }
 
-      const output = document.getElementById('output');
-      output.style.display = 'block';
-      output.innerHTML = 'Creating stream...\n';
-      exchangeConfigs.forEach(config => {
-        output.innerHTML += `${config.exchange}: ${config.fields.join(', ')}\n`;
-      });
+      const console_elem = document.getElementById('console');
+      console_elem.classList.add('active');
+      console_elem.innerHTML = '> Initializing stream...\n';
+
+      document.getElementById('emptyState').style.display = 'none';
+      document.getElementById('headerStatus').textContent = 'Connecting';
 
       try {
         const response = await fetch('/v1/streams', {
@@ -490,14 +893,16 @@
         const data = await response.json();
 
         if (!response.ok || !data.stream_id) {
-          output.innerHTML += `\n❌ Error: ${data.detail || JSON.stringify(data)}\n`;
+          console_elem.innerHTML += `> ERROR: ${data.detail || JSON.stringify(data)}\n`;
+          document.getElementById('headerStatus').textContent = 'Error';
           return;
         }
 
-        output.innerHTML += `\n✅ Stream created: ${data.stream_id}\n`;
-        output.innerHTML += `Connecting...\n`;
+        console_elem.innerHTML += `> Stream ID: ${data.stream_id}\n`;
+        console_elem.innerHTML += `> Establishing WebSocket connection...\n`;
 
-        // Initialize display with all selected fields
+        document.getElementById('headerStreamCount').textContent = '1';
+
         initializeDisplay(exchangeConfigs);
 
         if (ws) ws.close();
@@ -509,51 +914,56 @@
         let updateCount = 0;
 
         ws.onopen = () => {
-          output.innerHTML += '✅ Connected!\n';
-          document.getElementById('streamData').classList.add('active');
-          document.getElementById('configInterval').textContent = interval;
-          document.getElementById('updateStatus').textContent = 'Running ✓';
+          console_elem.innerHTML += '> Connected - Streaming live data\n';
+          document.getElementById('perfStats').classList.add('active');
+          document.getElementById('dataGrid').classList.add('active');
+          document.getElementById('configInterval').textContent = interval + 's';
+          document.getElementById('updateStatus').textContent = '🟢 Active';
+          document.getElementById('updateStatus').style.color = 'var(--accent-green)';
+          document.getElementById('headerStatus').textContent = 'Active';
+          document.getElementById('headerStatus').style.color = 'var(--accent-green)';
           lastUpdateTime = Date.now();
         };
 
         ws.onmessage = (event) => {
           const streamEvent = JSON.parse(event.data);
 
-          // Calculate actual update speed
           const now = Date.now();
           const timeSinceLastUpdate = lastUpdateTime ? (now - lastUpdateTime) / 1000 : 0;
           lastUpdateTime = now;
           updateCount++;
 
-          // Update stats display
-          document.getElementById('updateSpeed').textContent = timeSinceLastUpdate.toFixed(2);
+          document.getElementById('updateSpeed').textContent = timeSinceLastUpdate.toFixed(3) + 's';
           document.getElementById('updateCount').textContent = updateCount;
+          document.getElementById('headerLatency').textContent = (timeSinceLastUpdate * 1000).toFixed(0) + 'ms';
 
-          // Console log for debugging
-          console.log(`[Update #${updateCount}] Speed: ${timeSinceLastUpdate.toFixed(2)}s | Trades: ${streamEvent.raw_data?.trades || 0}`);
-
-          // Color code based on speed
           const speedEl = document.getElementById('updateSpeed');
           if (timeSinceLastUpdate < 0.5) {
-            speedEl.style.color = '#28a745'; // Green for real-time
+            speedEl.className = 'perf-value green';
           } else if (timeSinceLastUpdate < 2) {
-            speedEl.style.color = '#007bff'; // Blue for good
+            speedEl.className = 'perf-value blue';
           } else {
-            speedEl.style.color = '#6c757d'; // Gray for slow
+            speedEl.className = 'perf-value gray';
           }
-
-          // Add speed info to event
-          streamEvent._updateSpeed = timeSinceLastUpdate.toFixed(2);
-          streamEvent._updateCount = updateCount;
 
           updateDataDisplay(streamEvent);
         };
 
-        ws.onerror = () => output.innerHTML += '❌ Error\n';
-        ws.onclose = () => output.innerHTML += 'Closed\n';
+        ws.onerror = () => {
+          console_elem.innerHTML += '> WebSocket error\n';
+          document.getElementById('headerStatus').textContent = 'Error';
+          document.getElementById('headerStatus').style.color = 'var(--accent-red)';
+        };
+
+        ws.onclose = () => {
+          console_elem.innerHTML += '> Connection closed\n';
+          document.getElementById('headerStatus').textContent = 'Disconnected';
+          document.getElementById('headerStatus').style.color = 'var(--text-muted)';
+        };
 
       } catch (error) {
-        output.innerHTML += `❌ ${error.message}\n`;
+        console_elem.innerHTML += `> EXCEPTION: ${error.message}\n`;
+        document.getElementById('headerStatus').textContent = 'Error';
       }
     });
 
@@ -561,42 +971,68 @@
       const dataGrid = document.getElementById('dataGrid');
       let html = '';
 
-      // Create all tiles upfront with "waiting" state
       exchangeConfigs.forEach(config => {
         config.fields.forEach(field => {
           const fieldLabel = availableFields.find(f => f.id === field)?.label || field;
           html += `
-            <div class="data-item" id="tile_${config.exchange}_${field}">
-              <div class="data-label">${config.exchange.toUpperCase()} - ${fieldLabel}</div>
-              <div class="data-value waiting">Waiting for data...</div>
+            <div class="data-tile" id="tile_${config.exchange}_${field}">
+              <div class="tile-header">
+                <div class="tile-label">${fieldLabel}</div>
+                <div class="tile-source">${config.exchange.toUpperCase()}</div>
+              </div>
+              <div class="tile-value waiting">Waiting for data...</div>
             </div>
           `;
         });
       });
 
-      // Additional sources
       if (document.getElementById('source_twitter').checked) {
         html += `
-          <div class="data-item" id="tile_tweets">
-            <div class="data-label">TWEETS</div>
-            <div class="data-value waiting">0</div>
+          <div class="data-tile" id="tile_tweets">
+            <div class="tile-header">
+              <div class="tile-label">Tweet Count</div>
+              <div class="tile-source">TWITTER</div>
+            </div>
+            <div class="tile-value waiting">0</div>
           </div>
         `;
       }
+
       if (document.getElementById('source_onchain').checked) {
         html += `
-          <div class="data-item" id="tile_onchain">
-            <div class="data-label">ON-CHAIN</div>
-            <div class="data-value waiting">0</div>
+          <div class="data-tile" id="tile_onchain">
+            <div class="tile-header">
+              <div class="tile-label">On-Chain Events</div>
+              <div class="tile-source">BLOCKCHAIN</div>
+            </div>
+            <div class="tile-value waiting">0</div>
           </div>
         `;
+      }
+
+      if (document.getElementById('source_google_trends').checked) {
+        const keywordsInput = document.getElementById('trends_keywords').value;
+        const keywords = keywordsInput.trim()
+          ? keywordsInput.split(',').map(k => k.trim())
+          : [document.getElementById('symbol').value.toLowerCase()];
+
+        keywords.forEach(keyword => {
+          html += `
+            <div class="data-tile" id="tile_trends_${keyword.replace(/\s+/g, '_')}">
+              <div class="tile-header">
+                <div class="tile-label">${keyword.toUpperCase()} Search Interest</div>
+                <div class="tile-source">GOOGLE</div>
+              </div>
+              <div class="tile-value waiting">--/100</div>
+            </div>
+          `;
+        });
       }
 
       dataGrid.innerHTML = html;
     }
 
     function updateDataDisplay(event) {
-      // Update per-exchange data
       if (event.raw_data && event.raw_data.exchange_data) {
         currentConfig.forEach(config => {
           const exchangeData = event.raw_data.exchange_data[config.exchange];
@@ -605,11 +1041,11 @@
               const tileId = `tile_${config.exchange}_${field}`;
               const tile = document.getElementById(tileId);
               if (tile) {
-                const valueDiv = tile.querySelector('.data-value');
+                const valueDiv = tile.querySelector('.tile-value');
                 const value = exchangeData[field];
                 if (value !== undefined && value !== null) {
                   valueDiv.classList.remove('waiting');
-                  valueDiv.textContent = typeof value === 'number' ? '$' + value.toFixed(2) : value;
+                  valueDiv.textContent = typeof value === 'number' ? '$' + value.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : value;
                 }
               }
             });
@@ -617,19 +1053,41 @@
         });
       }
 
-      // Update additional sources
       const tweetsTile = document.getElementById('tile_tweets');
       if (tweetsTile && event.tweets !== undefined) {
-        const valueDiv = tweetsTile.querySelector('.data-value');
+        const valueDiv = tweetsTile.querySelector('.tile-value');
         valueDiv.classList.remove('waiting');
         valueDiv.textContent = event.tweets;
       }
 
       const onchainTile = document.getElementById('tile_onchain');
       if (onchainTile && event.onchain_count !== undefined) {
-        const valueDiv = onchainTile.querySelector('.data-value');
+        const valueDiv = onchainTile.querySelector('.tile-value');
         valueDiv.classList.remove('waiting');
         valueDiv.textContent = event.onchain_count;
+      }
+
+      if (event.raw_data && event.raw_data.custom_data) {
+        const customData = event.raw_data.custom_data;
+        if (customData.source === 'google_trends' && customData.keyword) {
+          const keyword = customData.keyword;
+          const tileId = `tile_trends_${keyword.replace(/\s+/g, '_')}`;
+          const tile = document.getElementById(tileId);
+
+          if (tile && customData.interest !== undefined) {
+            const valueDiv = tile.querySelector('.tile-value');
+            valueDiv.classList.remove('waiting');
+            valueDiv.textContent = `${customData.interest}/100`;
+
+            if (customData.interest >= 75) {
+              valueDiv.style.color = 'var(--accent-green)';
+            } else if (customData.interest >= 50) {
+              valueDiv.style.color = 'var(--accent-blue)';
+            } else {
+              valueDiv.style.color = 'var(--text-muted)';
+            }
+          }
+        }
       }
     }
   </script>
