@@ -249,6 +249,41 @@
               <input type="checkbox" id="source_liq">
               <label>📉 Liquidations</label>
             </div>
+            <div class="field-item" onclick="toggleCheckbox('source_google_trends')">
+              <input type="checkbox" id="source_google_trends">
+              <label>📈 Google Trends</label>
+            </div>
+          </div>
+        </div>
+
+        <!-- Google Trends Configuration (shown when checked) -->
+        <div class="section hidden" id="googleTrendsConfig">
+          <div class="section-title">🔍 Google Trends Settings</div>
+          <div class="form-group">
+            <label for="trends_keywords" style="display: block; margin-bottom: 8px; color: #666; font-size: 14px;">
+              Keywords to track (comma-separated, max 5):
+            </label>
+            <input
+              type="text"
+              id="trends_keywords"
+              placeholder="e.g., bitcoin, ethereum, crypto"
+              style="width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 16px;"
+            >
+            <div style="margin-top: 8px; font-size: 13px; color: #666;">
+              💡 Leave blank to auto-use selected symbol
+            </div>
+          </div>
+          <div class="form-group" style="margin-top: 15px;">
+            <label for="trends_timeframe" style="display: block; margin-bottom: 8px; color: #666; font-size: 14px;">
+              Timeframe:
+            </label>
+            <select id="trends_timeframe" style="width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 16px;">
+              <option value="now 1-H">Last Hour</option>
+              <option value="now 4-H">Last 4 Hours</option>
+              <option value="now 1-d" selected>Last 24 Hours</option>
+              <option value="now 7-d">Last 7 Days</option>
+              <option value="today 1-m">Last 30 Days</option>
+            </select>
           </div>
         </div>
 
@@ -256,15 +291,22 @@
         <div class="section">
           <div class="section-title">4️⃣ Update Interval</div>
           <div class="form-group">
-            <select id="interval" required>
-              <option value="1">1 second</option>
-              <option value="2">2 seconds</option>
-              <option value="3">3 seconds</option>
-              <option value="5" selected>5 seconds</option>
-              <option value="10">10 seconds</option>
-              <option value="15">15 seconds</option>
-              <option value="30">30 seconds</option>
-            </select>
+            <label for="interval" style="display: block; margin-bottom: 8px; color: #666; font-size: 14px;">
+              Enter interval in seconds (minimum 0.1 for real-time):
+            </label>
+            <input
+              type="number"
+              id="interval"
+              min="0.1"
+              step="0.1"
+              value="1"
+              required
+              style="width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 16px;"
+              placeholder="e.g., 0.5, 1, 2, 5"
+            >
+            <div style="margin-top: 8px; font-size: 13px; color: #666;">
+              💡 <strong>Tip:</strong> 0.1-0.5s = real-time (high CPU), 1-3s = balanced, 5s+ = low frequency
+            </div>
           </div>
         </div>
 
@@ -276,6 +318,14 @@
 
     <div class="stream-data" id="streamData">
       <h2>📊 Live Stream Data</h2>
+      <div id="updateStats" style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 20px; font-family: monospace;">
+        <div style="display: flex; gap: 30px; flex-wrap: wrap;">
+          <div>⚡ <strong>Update Speed:</strong> <span id="updateSpeed">--</span>s</div>
+          <div>📈 <strong>Updates:</strong> <span id="updateCount">0</span></div>
+          <div>⏱️ <strong>Configured Interval:</strong> <span id="configInterval">--</span>s</div>
+          <div>🎯 <strong>Status:</strong> <span id="updateStatus">Connecting...</span></div>
+        </div>
+      </div>
       <div class="data-grid" id="dataGrid"></div>
     </div>
   </div>
@@ -298,6 +348,16 @@
     function toggleCheckbox(id) {
       const cb = document.getElementById(id);
       cb.checked = !cb.checked;
+
+      // Show/hide Google Trends config when checkbox toggled
+      if (id === 'source_google_trends') {
+        const config = document.getElementById('googleTrendsConfig');
+        if (cb.checked) {
+          config.classList.remove('hidden');
+        } else {
+          config.classList.add('hidden');
+        }
+      }
     }
 
     function addExchange(exchangeName) {
@@ -384,7 +444,7 @@
           fields: config.fields,
           symbols: [`${symbol}/USDT`]
         })),
-        interval_sec: parseInt(interval),
+        interval_sec: parseFloat(interval),
         symbols: [`${symbol}/USDT`]
       };
 
@@ -397,6 +457,20 @@
       }
       if (document.getElementById('source_liq').checked) {
         spec.sources.push({ type: 'custom', mode: 'mock_liq' });
+      }
+      if (document.getElementById('source_google_trends').checked) {
+        const keywordsInput = document.getElementById('trends_keywords').value;
+        const timeframe = document.getElementById('trends_timeframe').value;
+
+        const keywords = keywordsInput.trim()
+          ? keywordsInput.split(',').map(k => k.trim().toLowerCase())
+          : [symbol.toLowerCase()];
+
+        spec.sources.push({
+          type: 'google_trends',
+          keywords: keywords,
+          timeframe: timeframe
+        });
       }
 
       const output = document.getElementById('output');
@@ -414,6 +488,12 @@
         });
 
         const data = await response.json();
+
+        if (!response.ok || !data.stream_id) {
+          output.innerHTML += `\n❌ Error: ${data.detail || JSON.stringify(data)}\n`;
+          return;
+        }
+
         output.innerHTML += `\n✅ Stream created: ${data.stream_id}\n`;
         output.innerHTML += `Connecting...\n`;
 
@@ -425,13 +505,47 @@
         const wsUrl = data.ws_url.replace('localhost', window.location.hostname);
         ws = new WebSocket(wsUrl);
 
+        let lastUpdateTime = null;
+        let updateCount = 0;
+
         ws.onopen = () => {
           output.innerHTML += '✅ Connected!\n';
           document.getElementById('streamData').classList.add('active');
+          document.getElementById('configInterval').textContent = interval;
+          document.getElementById('updateStatus').textContent = 'Running ✓';
+          lastUpdateTime = Date.now();
         };
 
         ws.onmessage = (event) => {
           const streamEvent = JSON.parse(event.data);
+
+          // Calculate actual update speed
+          const now = Date.now();
+          const timeSinceLastUpdate = lastUpdateTime ? (now - lastUpdateTime) / 1000 : 0;
+          lastUpdateTime = now;
+          updateCount++;
+
+          // Update stats display
+          document.getElementById('updateSpeed').textContent = timeSinceLastUpdate.toFixed(2);
+          document.getElementById('updateCount').textContent = updateCount;
+
+          // Console log for debugging
+          console.log(`[Update #${updateCount}] Speed: ${timeSinceLastUpdate.toFixed(2)}s | Trades: ${streamEvent.raw_data?.trades || 0}`);
+
+          // Color code based on speed
+          const speedEl = document.getElementById('updateSpeed');
+          if (timeSinceLastUpdate < 0.5) {
+            speedEl.style.color = '#28a745'; // Green for real-time
+          } else if (timeSinceLastUpdate < 2) {
+            speedEl.style.color = '#007bff'; // Blue for good
+          } else {
+            speedEl.style.color = '#6c757d'; // Gray for slow
+          }
+
+          // Add speed info to event
+          streamEvent._updateSpeed = timeSinceLastUpdate.toFixed(2);
+          streamEvent._updateCount = updateCount;
+
           updateDataDisplay(streamEvent);
         };
 

@@ -155,7 +155,7 @@ class StreamSpec(BaseModel):
   sources: list[dict[str, Any]] = Field(
     description="List of data sources (ccxt, onchain, twitter, custom)"
   )
-  interval_sec: int = Field(5, description="Aggregation window in seconds")
+  interval_sec: float = Field(5, description="Aggregation window in seconds")
   symbols: list[str] = Field(["BTC/USDT"], description="Symbols to track")
   transforms: Optional[list[dict[str, Any]]] = Field(
     None,

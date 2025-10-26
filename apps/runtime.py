@@ -12,6 +12,7 @@ from connectors.ccxt_ws import ccxt_ws_stream
 from connectors.x_stream import x_stream
 from connectors.custom_ws import custom_stream
 from connectors.onchain_grpc import onchain_stream
+from connectors.google_trends_stream import google_trends_stream
 
 
 class StreamRuntime:
@@ -77,6 +78,7 @@ class StreamRuntime:
     ccxt_src = None
     twitter_src = None
     custom_src = None
+    google_trends_src = None
     print(f"[runtime] Initialized sources to None", flush=True)
 
     print(f"[runtime] Checking if ccxt in source_types: {'ccxt' in source_types}", flush=True)
@@ -135,16 +137,32 @@ class StreamRuntime:
       symbol = symbols[0].split("/")[0] if symbols else "BTC"
       twitter_src = x_stream(symbol, interval=interval)
 
+    if "google_trends" in source_types:
+      # Find google_trends source config
+      trends_cfg = next((s for s in spec.sources if s["type"] == "google_trends"), {})
+      keywords = trends_cfg.get("keywords", [])
+      timeframe = trends_cfg.get("timeframe", "now 1-H")
+
+      # If no keywords specified, derive from symbols
+      if not keywords:
+        keywords = [sym.split("/")[0].lower() for sym in symbols] if symbols else ["bitcoin"]
+
+      print(f"[runtime] Google Trends source: keywords={keywords}, timeframe={timeframe}")
+      google_trends_src = google_trends_stream(keywords, interval, timeframe)
+
     # Handle on-chain source (maps to custom_src for pipeline compatibility)
     if "onchain" in source_types or "onchain.grpc" in source_types:
       # Find onchain source config
       onchain_cfg = next(
-        (s for s in spec.sources if s["type"] in ["onchain", "onchain.grpc"]), 
+        (s for s in spec.sources if s["type"] in ["onchain", "onchain.grpc"]),
         {}
       )
       chain = onchain_cfg.get("chain", "sol")
       event_types = onchain_cfg.get("event_types", ["tx", "transfer"])
       custom_src = onchain_stream(chain, event_types, interval)
+    elif "google_trends" in source_types:
+      # Map Google Trends to custom_src for pipeline compatibility
+      custom_src = google_trends_src
     elif "custom" in source_types:
       # Find custom source config
       custom_cfg = next((s for s in spec.sources if s["type"] == "custom"), {})

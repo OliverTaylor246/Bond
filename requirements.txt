@@ -18,6 +18,9 @@ redis[hiredis]==5.0.1
 # HTTP client
 httpx==0.26.0
 
+# Google Trends
+pytrends==4.9.2
+
 # gRPC for on-chain data (Yellowstone Geyser)
 grpcio==1.60.0
 grpcio-tools==1.60.0
