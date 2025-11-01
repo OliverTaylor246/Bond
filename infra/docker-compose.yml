@@ -23,6 +23,8 @@ services:
       dockerfile: infra/Dockerfile.api
     ports:
       - "8000:8000"
+    env_file:
+      - ../.env
     environment:
       - REDIS_URL=redis://redis:6379
       - WS_HOST=localhost:8080
