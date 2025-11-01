@@ -589,6 +589,28 @@
   <div class="main-container">
     <!-- Left Panel: Configuration -->
     <div class="config-panel">
+      <!-- Natural Language Input -->
+      <div class="panel-section">
+        <div class="section-header">
+          <div class="section-number">💬</div>
+          <span>Natural Language Query</span>
+        </div>
+        <textarea
+          id="nlQuery"
+          placeholder="Example: show me live bitcoin prices from kraken with volume"
+          style="width: 100%; min-height: 80px; resize: vertical; font-family: 'Inter', sans-serif; background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary); padding: 12px; border-radius: 6px; font-size: 14px; line-height: 1.5;"
+        ></textarea>
+        <div class="hint-text">
+          💡 Try: "btc prices right now" | "eth from all exchanges" | "solana with twitter sentiment"
+        </div>
+        <button type="button" class="btn btn-success" onclick="submitNaturalLanguage()" style="margin-top: 12px;">
+          🤖 Parse & Launch Stream
+        </button>
+        <div style="text-align: center; margin: 16px 0; color: var(--text-muted); font-size: 12px; font-weight: 600;">
+          — OR —
+        </div>
+      </div>
+
       <form id="streamForm">
         <!-- Symbol Selection -->
         <div class="panel-section">
@@ -756,6 +778,10 @@
       { id: 'volume', label: 'Volume' }
     ];
 
+    function sanitizeIdPart(value) {
+      return (value || 'default').replace(/[^a-zA-Z0-9]/g, '_');
+    }
+
     function toggleCheckbox(id) {
       const cb = document.getElementById(id);
       cb.checked = !cb.checked;
@@ -829,7 +855,8 @@
         if (selectedFields.length > 0) {
           exchangeConfigs.push({
             exchange: exchangeName,
-            fields: selectedFields
+            fields: selectedFields,
+            symbols: [`${symbol.toUpperCase()}/USDT`]
           });
         }
       });
@@ -972,17 +999,27 @@
       let html = '';
 
       exchangeConfigs.forEach(config => {
-        config.fields.forEach(field => {
-          const fieldLabel = availableFields.find(f => f.id === field)?.label || field;
-          html += `
-            <div class="data-tile" id="tile_${config.exchange}_${field}">
-              <div class="tile-header">
-                <div class="tile-label">${fieldLabel}</div>
-                <div class="tile-source">${config.exchange.toUpperCase()}</div>
+        const symbols = (config.symbols && config.symbols.length > 0) ? config.symbols : [null];
+        symbols.forEach(symbol => {
+          config.fields.forEach(field => {
+            const fieldLabel = availableFields.find(f => f.id === field)?.label || field;
+            const symbolLabel = symbol ? symbol.toUpperCase() : '';
+            const tileId = symbol
+              ? `tile_${config.exchange}_${sanitizeIdPart(symbol)}_${field}`
+              : `tile_${config.exchange}_${field}`;
+            const sourceLabel = symbol
+              ? `${config.exchange.toUpperCase()} · ${symbolLabel}`
+              : config.exchange.toUpperCase();
+            html += `
+              <div class="data-tile" id="${tileId}">
+                <div class="tile-header">
+                  <div class="tile-label">${fieldLabel}</div>
+                  <div class="tile-source">${sourceLabel}</div>
+                </div>
+                <div class="tile-value waiting">Waiting for data...</div>
               </div>
-              <div class="tile-value waiting">Waiting for data...</div>
-            </div>
-          `;
+            `;
+          });
         });
       });
 
@@ -1032,24 +1069,187 @@
       dataGrid.innerHTML = html;
     }
 
+    async function submitNaturalLanguage() {
+      const query = document.getElementById('nlQuery').value.trim();
+      if (!query) {
+        alert('Please enter a query');
+        return;
+      }
+
+      const console_elem = document.getElementById('console');
+      console_elem.classList.add('active');
+      console_elem.innerHTML = `> Parsing query: "${query}"\n`;
+      document.getElementById('emptyState').style.display = 'none';
+      document.getElementById('headerStatus').textContent = 'Parsing';
+
+      try {
+        // Parse natural language to spec
+        const parseResponse = await fetch('/v1/streams/parse', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ query })
+        });
+
+        const parseData = await parseResponse.json();
+
+        if (!parseResponse.ok) {
+          console_elem.innerHTML += `> PARSE ERROR: ${parseData.detail || JSON.stringify(parseData)}\n`;
+          document.getElementById('headerStatus').textContent = 'Error';
+          return;
+        }
+
+        console_elem.innerHTML += `> LLM Reasoning: ${parseData.reasoning}\n`;
+        console_elem.innerHTML += `> Creating stream...\n`;
+
+        // Extract exchange configs from parsed data for display initialization
+        const parsedSymbols = (parseData.parsed_config.symbols || []).map(sym => `${sym.toUpperCase()}/USDT`);
+        const exchangeConfigs = (parseData.parsed_config.exchanges || []).map(cfg => ({
+          ...cfg,
+          symbols: parsedSymbols.length ? parsedSymbols : [`${document.getElementById('symbol').value.toUpperCase()}/USDT`]
+        }));
+        currentConfig.length = 0;
+        currentConfig.push(...exchangeConfigs);
+
+        // Create stream with parsed spec
+        const response = await fetch('/v1/streams', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ spec: parseData.spec })
+        });
+
+        const data = await response.json();
+
+        if (!response.ok || !data.stream_id) {
+          console_elem.innerHTML += `> ERROR: ${data.detail || JSON.stringify(data)}\n`;
+          document.getElementById('headerStatus').textContent = 'Error';
+          return;
+        }
+
+        console_elem.innerHTML += `> Stream ID: ${data.stream_id}\n`;
+        console_elem.innerHTML += `> Establishing WebSocket connection...\n`;
+
+        document.getElementById('headerStreamCount').textContent = '1';
+
+        initializeDisplay(exchangeConfigs);
+
+        if (ws) ws.close();
+
+        const wsUrl = data.ws_url.replace('localhost', window.location.hostname);
+        ws = new WebSocket(wsUrl);
+
+        let lastUpdateTime = null;
+        let updateCount = 0;
+
+        ws.onopen = () => {
+          console_elem.innerHTML += '> Connected - Streaming live data\n';
+          document.getElementById('perfStats').classList.add('active');
+          document.getElementById('dataGrid').classList.add('active');
+          document.getElementById('configInterval').textContent = parseData.spec.interval_sec + 's';
+          document.getElementById('updateStatus').textContent = '🟢 Active';
+          document.getElementById('updateStatus').style.color = 'var(--accent-green)';
+          document.getElementById('headerStatus').textContent = 'Active';
+          document.getElementById('headerStatus').style.color = 'var(--accent-green)';
+          lastUpdateTime = Date.now();
+        };
+
+        ws.onmessage = (event) => {
+          const streamEvent = JSON.parse(event.data);
+
+          const now = Date.now();
+          const timeSinceLastUpdate = lastUpdateTime ? (now - lastUpdateTime) / 1000 : 0;
+          lastUpdateTime = now;
+          updateCount++;
+
+          document.getElementById('updateSpeed').textContent = timeSinceLastUpdate.toFixed(3) + 's';
+          document.getElementById('updateCount').textContent = updateCount;
+          document.getElementById('headerLatency').textContent = (timeSinceLastUpdate * 1000).toFixed(0) + 'ms';
+
+          const speedEl = document.getElementById('updateSpeed');
+          if (timeSinceLastUpdate < 0.5) {
+            speedEl.className = 'perf-value green';
+          } else if (timeSinceLastUpdate < 2) {
+            speedEl.className = 'perf-value blue';
+          } else {
+            speedEl.className = 'perf-value gray';
+          }
+
+          updateDataDisplay(streamEvent);
+        };
+
+        ws.onerror = () => {
+          console_elem.innerHTML += '> WebSocket error\n';
+          document.getElementById('headerStatus').textContent = 'Error';
+          document.getElementById('headerStatus').style.color = 'var(--accent-red)';
+        };
+
+        ws.onclose = () => {
+          console_elem.innerHTML += '> Connection closed\n';
+          document.getElementById('headerStatus').textContent = 'Disconnected';
+          document.getElementById('headerStatus').style.color = 'var(--text-muted)';
+        };
+
+      } catch (error) {
+        console_elem.innerHTML += `> EXCEPTION: ${error.message}\n`;
+        document.getElementById('headerStatus').textContent = 'Error';
+      }
+    }
+
     function updateDataDisplay(event) {
       if (event.raw_data && event.raw_data.exchange_data) {
         currentConfig.forEach(config => {
           const exchangeData = event.raw_data.exchange_data[config.exchange];
-          if (exchangeData) {
+          if (!exchangeData) {
+            return;
+          }
+          const symbolEntries = exchangeData.symbols || {};
+          const symbols = (config.symbols && config.symbols.length > 0) ? config.symbols : [null];
+
+          symbols.forEach(symbol => {
             config.fields.forEach(field => {
-              const tileId = `tile_${config.exchange}_${field}`;
+              const tileId = symbol
+                ? `tile_${config.exchange}_${sanitizeIdPart(symbol)}_${field}`
+                : `tile_${config.exchange}_${field}`;
               const tile = document.getElementById(tileId);
-              if (tile) {
+              if (!tile) {
+                return;
+              }
+
+              let value;
+              if (symbol) {
+                const possibleKeys = [
+                  symbol,
+                  symbol.toUpperCase(),
+                  symbol.replace('/USDT', ''),
+                  symbol.split('/')[0]
+                ];
+                for (const key of possibleKeys) {
+                  if (key && symbolEntries[key]) {
+                    value = symbolEntries[key][field];
+                    if (value !== undefined) {
+                      break;
+                    }
+                  }
+                }
+              } else {
+                value = exchangeData[field];
+              }
+
+              if (value !== undefined && value !== null) {
                 const valueDiv = tile.querySelector('.tile-value');
-                const value = exchangeData[field];
-                if (value !== undefined && value !== null) {
-                  valueDiv.classList.remove('waiting');
-                  valueDiv.textContent = typeof value === 'number' ? '$' + value.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : value;
+                valueDiv.classList.remove('waiting');
+                if (typeof value === 'number') {
+                  const isVolume = field === 'volume';
+                  const formatted = value.toLocaleString('en-US', {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2
+                  });
+                  valueDiv.textContent = isVolume ? formatted : '$' + formatted;
+                } else {
+                  valueDiv.textContent = value;
                 }
               }
             });
-          }
+          });
         });
       }
 

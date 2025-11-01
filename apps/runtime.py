@@ -3,12 +3,13 @@ Runtime manager - orchestrates live stream pipelines.
 Manages lifecycle of running streams (start, stop, health checks).
 """
 import asyncio
+from collections import defaultdict
 from typing import Any
 from engine.schemas import StreamSpec
 from engine.pipeline_three import ThreeSourcePipeline
 from engine.dispatch import RedisDispatcher
 from connectors.ccxt_polling import ccxt_poll_stream
-from connectors.ccxt_ws import ccxt_ws_stream
+from connectors.ccxt_ws import ccxt_ws_exchange_stream
 from connectors.x_stream import x_stream
 from connectors.custom_ws import custom_stream
 from connectors.onchain_grpc import onchain_stream
@@ -84,33 +85,54 @@ class StreamRuntime:
     print(f"[runtime] Checking if ccxt in source_types: {'ccxt' in source_types}", flush=True)
     if "ccxt" in source_types:
       print(f"[runtime] YES, ccxt is in source_types", flush=True)
-      try:
-        symbol = symbols[0] if symbols else "BTC/USDT"
-        print(f"[runtime] CCXT source detected, symbol: {symbol}", flush=True)
-      except Exception as e:
-        print(f"[runtime] ERROR getting symbol: {e}", flush=True)
-        import traceback
-        traceback.print_exc()
-        raise
 
       # Collect all exchanges from CCXT sources
-      exchanges_to_use = []
+      symbols_by_exchange: dict[str, set[str]] = defaultdict(set)
       for source in spec.sources:
         if source.get("type") == "ccxt" and source.get("exchange"):
-          exchanges_to_use.append(source["exchange"])
+          ex_name = source["exchange"]
+          source_symbols = source.get("symbols") or symbols
+          if not source_symbols:
+            continue
+          for sym in source_symbols:
+            if sym:
+              symbols_by_exchange[ex_name].add(sym)
 
-      print(f"[runtime] Exchanges to use: {exchanges_to_use}")
+      exchanges_to_use = {
+        ex_name: sorted(sym_set) for ex_name, sym_set in symbols_by_exchange.items()
+      }
 
-      # If multiple exchanges, merge their streams
-      if len(exchanges_to_use) > 1:
+      if not exchanges_to_use:
+        print("[runtime] No CCXT exchanges configured after parsing sources", flush=True)
+      else:
+        print(f"[runtime] Exchanges to use: {list(exchanges_to_use.keys())}")
+        print(f"[runtime] Symbols by exchange: {exchanges_to_use}")
+
+        # Create merged stream for all symbols and all exchanges
         async def merged_ccxt_stream():
           queue = asyncio.Queue()
 
-          async def pump_exchange(ex_name: str):
-            async for event in ccxt_ws_stream(symbol, ex_name):
-              await queue.put(event)
+          async def pump_exchange(ex_name: str, sym_list: list[str]):
+            try:
+              async for event in ccxt_ws_exchange_stream(ex_name, sym_list):
+                await queue.put(event)
+            except asyncio.CancelledError:
+              raise
+            except Exception as e:
+              print(f"[runtime] Error in stream for {ex_name}: {e}")
 
-          tasks = [asyncio.create_task(pump_exchange(ex)) for ex in exchanges_to_use]
+          tasks = [
+            asyncio.create_task(pump_exchange(ex, sym_list))
+            for ex, sym_list in exchanges_to_use.items()
+            if sym_list
+          ]
+
+          total_symbol_subscriptions = sum(len(sym_list) for sym_list in exchanges_to_use.values())
+          print(
+            f"[runtime] Created {len(tasks)} exchange WebSocket streams covering "
+            f"{total_symbol_subscriptions} symbol subscriptions",
+            flush=True,
+          )
 
           try:
             while True:
@@ -121,17 +143,10 @@ class StreamRuntime:
             await asyncio.gather(*tasks, return_exceptions=True)
 
         ccxt_src = merged_ccxt_stream()
-        print(f"[runtime] Using merged WebSocket stream for {len(exchanges_to_use)} exchanges")
-      elif len(exchanges_to_use) == 1:
-        # Single exchange WebSocket
-        print(f"[runtime] About to call ccxt_ws_stream({symbol}, {exchanges_to_use[0]})", flush=True)
-        ccxt_src = ccxt_ws_stream(symbol, exchanges_to_use[0])
-        print(f"[runtime] Created WebSocket stream generator: {ccxt_src}", flush=True)
-        print(f"[runtime] Using single WebSocket stream: {exchanges_to_use[0]}")
-      else:
-        # Default to kraken WebSocket
-        ccxt_src = ccxt_ws_stream(symbol, "kraken")
-        print(f"[runtime] Using default WebSocket stream: kraken")
+        print(
+          "[runtime] Using merged WebSocket stream with shared exchange connections",
+          flush=True,
+        )
 
     if "twitter" in source_types:
       symbol = symbols[0].split("/")[0] if symbols else "BTC"

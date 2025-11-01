@@ -14,6 +14,7 @@ from apps.runtime import StreamRuntime
 from apps.api.crypto import generate_token, get_secret
 from apps.api.limits import limits
 from apps.api.metrics import metrics_registry
+from apps.api.nlp_parser import parse_stream_request
 
 
 # Global runtime instance
@@ -204,7 +205,7 @@ async def refresh_token(stream_id: str):
 async def get_stream_metrics(stream_id: str):
   """
   Get metrics for a stream.
-  
+
   Returns message counts, latency percentiles, dropped events, and uptime.
   """
   if not runtime:
@@ -228,3 +229,66 @@ async def get_stream_metrics(stream_id: str):
     }
 
   return metrics.to_dict()
+
+
+class NLParseRequest(BaseModel):
+  """Request to parse natural language into stream config."""
+  query: str
+
+
+class NLParseResponse(BaseModel):
+  """Response with parsed stream configuration."""
+  spec: dict[str, Any]
+  reasoning: str
+  parsed_config: dict[str, Any]
+
+
+@app.post("/v1/streams/parse", response_model=NLParseResponse)
+async def parse_nl_stream(req: NLParseRequest):
+  """
+  Parse natural language into stream configuration.
+
+  Example: "show me live btc prices" -> structured stream spec
+  """
+  api_key = os.getenv("DEEPSEEK_API_KEY")
+  if not api_key:
+    raise HTTPException(500, "DEEPSEEK_API_KEY not configured")
+
+  try:
+    config = await parse_stream_request(req.query, api_key)
+
+    # Convert to StreamSpec format
+    spec = {
+      "sources": [],
+      "symbols": [f"{sym}/USDT" for sym in config["symbols"]],
+      "interval_sec": config["interval_sec"]
+    }
+
+    # Add exchange sources (one source per exchange with all symbols)
+    for exchange_cfg in config["exchanges"]:
+      spec["sources"].append({
+        "type": "ccxt",
+        "exchange": exchange_cfg["exchange"],
+        "fields": exchange_cfg["fields"],
+        "symbols": [f"{symbol}/USDT" for symbol in config["symbols"]]
+      })
+
+    # Add additional sources
+    for source in config.get("additional_sources", []):
+      if source == "twitter":
+        spec["sources"].append({"type": "twitter"})
+      elif source == "google_trends":
+        spec["sources"].append({
+          "type": "google_trends",
+          "keywords": [s.lower() for s in config["symbols"]],
+          "timeframe": "now 1-d"
+        })
+
+    return NLParseResponse(
+      spec=spec,
+      reasoning=config.get("reasoning", ""),
+      parsed_config=config
+    )
+
+  except Exception as e:
+    raise HTTPException(400, f"Failed to parse request: {str(e)}")

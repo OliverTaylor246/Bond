@@ -5,7 +5,6 @@ Aggregates events over time windows and produces unified output.
 Performance requirement: latency must stay under 500ms for test loads.
 """
 import asyncio
-from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import AsyncIterator, Any
 from engine.schemas import AggregatedEvent
@@ -114,31 +113,46 @@ class ThreeSourcePipeline:
     price_open = opens[0] if opens else None
     price_close = closes[-1] if closes else None
 
-    # Build per-exchange data structure
-    exchange_data = {}
+    # Build per-exchange + per-symbol data structure
+    exchange_data: dict[str, dict[str, Any]] = {}
     for event in self.trade_buffer:
       source = event.get("source")
-      if source:
-        if source not in exchange_data:
-          exchange_data[source] = {}
+      symbol = event.get("symbol")
+      if not source or not symbol:
+        continue
 
-        # Store latest value for each field
-        if "price" in event:
-          exchange_data[source]["price"] = event["price"]
-        if event.get("bid") is not None:
-          exchange_data[source]["bid"] = event["bid"]
-        if event.get("ask") is not None:
-          exchange_data[source]["ask"] = event["ask"]
-        if event.get("high") is not None:
-          exchange_data[source]["high"] = event["high"]
-        if event.get("low") is not None:
-          exchange_data[source]["low"] = event["low"]
-        if event.get("open") is not None:
-          exchange_data[source]["open"] = event["open"]
-        if event.get("close") is not None:
-          exchange_data[source]["close"] = event["close"]
-        if "qty" in event:
-          exchange_data[source]["volume"] = event["qty"]
+      exchange_entry = exchange_data.setdefault(
+        source,
+        {"symbols": {}, "latest_symbol": symbol},
+      )
+      exchange_entry["latest_symbol"] = symbol
+      symbol_entry = exchange_entry["symbols"].setdefault(symbol, {})
+
+      # Store latest value for each field at symbol granularity
+      if "price" in event:
+        symbol_entry["price"] = event["price"]
+        exchange_entry["price"] = event["price"]
+      if event.get("bid") is not None:
+        symbol_entry["bid"] = event["bid"]
+        exchange_entry["bid"] = event["bid"]
+      if event.get("ask") is not None:
+        symbol_entry["ask"] = event["ask"]
+        exchange_entry["ask"] = event["ask"]
+      if event.get("high") is not None:
+        symbol_entry["high"] = event["high"]
+        exchange_entry["high"] = event["high"]
+      if event.get("low") is not None:
+        symbol_entry["low"] = event["low"]
+        exchange_entry["low"] = event["low"]
+      if event.get("open") is not None:
+        symbol_entry["open"] = event["open"]
+        exchange_entry["open"] = event["open"]
+      if event.get("close") is not None:
+        symbol_entry["close"] = event["close"]
+        exchange_entry["close"] = event["close"]
+      if "qty" in event:
+        symbol_entry["volume"] = event["qty"]
+        exchange_entry["volume"] = event["qty"]
 
     # Count tweets and custom events
     tweets_count = len(self.tweet_buffer)
@@ -154,6 +168,10 @@ class ThreeSourcePipeline:
     onchain_value_sum = sum(onchain_values) if onchain_values else None
 
     # Build aggregated event
+    symbols_seen = sorted({
+      e.get("symbol") for e in self.trade_buffer if e.get("symbol")
+    })
+
     agg_event = AggregatedEvent(
       ts=now,
       window_start=self.last_flush,
@@ -175,6 +193,7 @@ class ThreeSourcePipeline:
         "sources": list(set(e.get("source") for e in self.trade_buffer)),
         "interval_sec": self.interval_sec,
         "exchange_data": exchange_data,  # Per-exchange breakdown
+        "symbols": symbols_seen,
       },
     )
 
