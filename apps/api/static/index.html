@@ -790,7 +790,7 @@
       streamStatus.textContent = stream.status;
       streamStatus.className = 'status-pill ' + (stream.status.toUpperCase().includes('STOP') ? 'error' : stream.status.toUpperCase().includes('PAUSE') ? 'warn' : '');
 
-      const schemaToRender = stream.schema && Object.keys(stream.schema).length ? stream.schema : (stream.derivedSchema || {});
+      const schemaToRender = getDisplaySchema(stream);
 
       detailBody.innerHTML = `
         <div class="panel">
@@ -885,11 +885,13 @@
 
     function copySchema(streamId, type) {
       const entry = activeStreams.get(streamId);
-      if (!entry || !entry.schema) return;
+      if (!entry) return;
+      const schema = getDisplaySchema(entry);
+      if (!schema || !Object.keys(schema).length) return;
       if (type === 'json') {
-        navigator.clipboard.writeText(JSON.stringify(entry.schema, null, 2));
+        navigator.clipboard.writeText(JSON.stringify(schema, null, 2));
       } else {
-        navigator.clipboard.writeText(Object.keys(entry.schema).join(','));
+        navigator.clipboard.writeText(Object.keys(schema).join(','));
       }
     }
 
@@ -981,6 +983,24 @@
         return { type: 'object', optional: false };
       }
       return { type: typeof value };
+    }
+
+    function getDisplaySchema(stream) {
+      const base = (stream.schema && Object.keys(stream.schema).length) ? stream.schema : (stream.derivedSchema || {});
+      const entries = Object.entries(base || {});
+      const filtered = {};
+      const eventKeys = stream.lastEvent ? new Set(Object.keys(stream.lastEvent)) : null;
+
+      for (const [field, meta] of entries) {
+        if (eventKeys && !eventKeys.has(field)) continue;
+        filtered[field] = meta;
+      }
+
+      if ((!filtered.symbol) && ((stream.spec?.symbols || []).length > 1 || stream.lastEvent?.symbol)) {
+        filtered.symbol = { type: 'string' };
+      }
+
+      return filtered;
     }
 
     function formatDuration(milliseconds) {
