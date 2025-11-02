@@ -1150,6 +1150,27 @@
           document.getElementById('headerStatus').textContent = 'Active';
           document.getElementById('headerStatus').style.color = 'var(--accent-green)';
           lastUpdateTime = Date.now();
+
+          // Initialize tweet tile if Nitter source exists
+          const hasNitterSource = parseData.spec.sources && parseData.spec.sources.some(s => s.type === 'nitter');
+          if (hasNitterSource) {
+            const dataGrid = document.getElementById('dataGrid');
+            const nitterSource = parseData.spec.sources.find(s => s.type === 'nitter');
+            const username = nitterSource.username || 'user';
+
+            const tileHtml = `
+              <div class="data-tile" id="tile_nitter_tweet" style="grid-column: 1 / -1;">
+                <div class="tile-header">
+                  <div class="tile-label">Latest Tweet from @${username}</div>
+                  <div class="tile-source">TWITTER/X</div>
+                </div>
+                <div class="tile-value waiting" style="font-size: 14px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; min-height: 60px;">Waiting for tweet data...</div>
+                <div class="tweet-timestamp" style="font-size: 12px; color: var(--text-muted); margin-top: 8px;"></div>
+                <div class="tweet-stats" style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;"></div>
+              </div>
+            `;
+            dataGrid.innerHTML = tileHtml;
+          }
         };
 
         ws.onmessage = (event) => {
@@ -1265,6 +1286,37 @@
         const valueDiv = onchainTile.querySelector('.tile-value');
         valueDiv.classList.remove('waiting');
         valueDiv.textContent = event.onchain_count;
+      }
+
+      // Handle Nitter tweet data (from raw_data.tweet_data or direct event)
+      const tweetData = event.raw_data?.tweet_data || (event.event_type === 'tweet' ? event : null);
+      if (tweetData && tweetData.text) {
+        let nitterTile = document.getElementById('tile_nitter_tweet');
+
+        if (nitterTile) {
+          // Update tweet text
+          const valueDiv = nitterTile.querySelector('.tile-value');
+          valueDiv.classList.remove('waiting');
+          valueDiv.textContent = tweetData.text;
+
+          // Update username in label
+          const labelDiv = nitterTile.querySelector('.tile-label');
+          if (labelDiv && tweetData.symbol) {
+            labelDiv.textContent = `Latest Tweet from @${tweetData.symbol.toLowerCase()}`;
+          }
+
+          // Update timestamp
+          const timestampDiv = nitterTile.querySelector('.tweet-timestamp');
+          if (timestampDiv && tweetData.timestamp_posted) {
+            timestampDiv.textContent = `Posted: ${tweetData.timestamp_posted}`;
+          }
+
+          // Update stats
+          const statsDiv = nitterTile.querySelector('.tweet-stats');
+          if (statsDiv && tweetData.stats) {
+            statsDiv.textContent = `💬 ${tweetData.stats.replies || 0} | 🔁 ${tweetData.stats.retweets || 0} | ❤️ ${tweetData.stats.likes || 0}`;
+          }
+        }
       }
 
       if (event.raw_data && event.raw_data.custom_data) {

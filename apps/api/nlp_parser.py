@@ -9,7 +9,8 @@ AVAILABLE_OPTIONS = {
     "popular_symbols": ["BTC", "ETH", "SOL"],  # Limited to top 3 - broker can't handle more concurrent WebSocket streams
     "exchanges": ["kraken", "kucoin"],
     "fields": ["price", "bid", "ask", "high", "low", "open", "close", "volume"],
-    "sources": ["twitter", "onchain", "liquidations", "google_trends"],
+    "sources": ["twitter", "onchain", "liquidations", "google_trends", "nitter"],
+    "twitter_users": ["elonmusk", "vitalikbuterin", "cz_binance", "SBF_FTX", "APompliano"],
     "intervals": {
         "realtime": 0.5,
         "fast": 1,
@@ -42,6 +43,7 @@ Available options:
 - Exchanges: {', '.join(AVAILABLE_OPTIONS['exchanges'])}
 - Fields: {', '.join(AVAILABLE_OPTIONS['fields'])}
 - Additional sources: {', '.join(AVAILABLE_OPTIONS['sources'])}
+- Twitter users for Nitter: {', '.join(AVAILABLE_OPTIONS['twitter_users'])}
 
 User request: "{user_input}"
 
@@ -69,6 +71,12 @@ Rules:
 10. Be generous - if user says "show me bitcoin", include price, volume, high, low
 11. "fastest refresh rate" or "fastest possible" means interval 0.1 seconds
 12. Convert all cryptocurrency names to uppercase ticker symbols (e.g., "bitcoin" -> "BTC", "ethereum" -> "ETH")
+13. If user mentions "tweets" OR specific Twitter usernames (elonmusk, vitalik, etc.) OR "@username" -> add nitter source with username
+14. For Nitter sources, format as: {{"type": "nitter", "username": "elonmusk", "interval_sec": X}}
+15. Default Twitter users: elonmusk, vitalikbuterin, cz_binance
+16. If user says "Elon tweets" or "Elon Musk tweets" -> add nitter source with username="elonmusk"
+17. IMPORTANT: If user ONLY asks for tweets/social data (no crypto mentioned), DO NOT add exchanges or symbols - return empty symbols array and empty exchanges array
+18. If user asks ONLY for tweets, only include the nitter source in additional_sources, no CCXT sources
 
 Return valid JSON only, no markdown formatting."""
 

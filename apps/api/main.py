@@ -15,6 +15,7 @@ from apps.api.crypto import generate_token, get_secret
 from apps.api.limits import limits
 from apps.api.metrics import metrics_registry
 from apps.api.nlp_parser import parse_stream_request
+from engine.schemas import StreamSpec
 
 
 # Global runtime instance
@@ -90,7 +91,49 @@ async def create_stream(req: CreateStreamRequest):
 
   # Compile spec
   if req.natural_language:
-    spec = compile_spec(req.natural_language)
+    # Use DeepSeek NL parser instead of basic parser
+    api_key = os.getenv("DEEPSEEK_API_KEY")
+    if not api_key:
+      raise HTTPException(500, "DEEPSEEK_API_KEY not configured")
+
+    # Parse with DeepSeek
+    config = await parse_stream_request(req.natural_language, api_key)
+
+    # Convert to StreamSpec format (same logic as /parse endpoint)
+    spec_dict = {
+      "sources": [],
+      "symbols": [f"{sym}/USDT" for sym in config["symbols"]],
+      "interval_sec": config["interval_sec"]
+    }
+
+    # Add exchange sources
+    for exchange_cfg in config["exchanges"]:
+      spec_dict["sources"].append({
+        "type": "ccxt",
+        "exchange": exchange_cfg["exchange"],
+        "fields": exchange_cfg["fields"],
+        "symbols": [f"{symbol}/USDT" for symbol in config["symbols"]]
+      })
+
+    # Add additional sources
+    for source in config.get("additional_sources", []):
+      if source == "twitter":
+        spec_dict["sources"].append({"type": "twitter"})
+      elif source == "google_trends":
+        spec_dict["sources"].append({
+          "type": "google_trends",
+          "keywords": [s.lower() for s in config["symbols"]],
+          "timeframe": "now 1-d"
+        })
+      elif isinstance(source, dict) and source.get("type") == "nitter":
+        # Nitter source with username
+        spec_dict["sources"].append({
+          "type": "nitter",
+          "username": source.get("username", "elonmusk"),
+          "interval_sec": source.get("interval_sec", config["interval_sec"])
+        })
+
+    spec = StreamSpec(**spec_dict)
   elif req.spec:
     spec = compile_spec(req.spec)
   else:
@@ -282,6 +325,13 @@ async def parse_nl_stream(req: NLParseRequest):
           "type": "google_trends",
           "keywords": [s.lower() for s in config["symbols"]],
           "timeframe": "now 1-d"
+        })
+      elif isinstance(source, dict) and source.get("type") == "nitter":
+        # Nitter source with username
+        spec["sources"].append({
+          "type": "nitter",
+          "username": source.get("username", "elonmusk"),
+          "interval_sec": source.get("interval_sec", config["interval_sec"])
         })
 
     return NLParseResponse(
