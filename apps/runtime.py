@@ -3,17 +3,21 @@ Runtime manager - orchestrates live stream pipelines.
 Manages lifecycle of running streams (start, stop, health checks).
 """
 import asyncio
-from collections import defaultdict
 from typing import Any
 from engine.schemas import StreamSpec
-from engine.pipeline_three import ThreeSourcePipeline
+from engine.pipeline_three import MultiSourcePipeline, SourceConfig
 from engine.dispatch import RedisDispatcher
-from connectors.ccxt_polling import ccxt_poll_stream
-from connectors.ccxt_ws import ccxt_ws_exchange_stream
+from connectors.ccxt_ws import (
+  ccxt_ws_exchange_stream,
+  ccxt_ws_candle_stream,
+  interval_to_timeframe,
+)
 from connectors.x_stream import x_stream
 from connectors.custom_ws import custom_stream
 from connectors.onchain_grpc import onchain_stream
 from connectors.google_trends_stream import google_trends_stream
+
+BASE_EXCHANGE_PREFERENCE = ["binance", "binanceus", "kraken", "kucoin"]
 
 
 class StreamRuntime:
@@ -63,160 +67,266 @@ class StreamRuntime:
       spec: Stream specification
     """
     print(f"[runtime] ====== _run_stream started for {stream_id} ======", flush=True)
-    # Extract config from spec
-    interval = spec.interval_sec
-    symbols = spec.symbols
+    interval = float(spec.interval_sec or 5.0)
+    if interval <= 0:
+      interval = 1.0
+
+    symbols = list(spec.symbols or ["BTC/USDT"])
+    if not symbols:
+      symbols = ["BTC/USDT"]
+    default_symbol = symbols[0]
+
     print(f"[runtime] interval={interval}, symbols={symbols}", flush=True)
 
-    # Determine which sources to activate
-    print(f"[runtime] About to extract source_types", flush=True)
-    source_types = {s["type"] for s in spec.sources}
-    print(f"[runtime] source_types={source_types}", flush=True)
-    print(f"[runtime] Creating source streams...", flush=True)
+    pipeline_sources: list[SourceConfig] = []
+    source_counter = {"value": 0}
 
-    # Create source streams
-    print(f"[runtime] After setup, creating sources", flush=True)
-    ccxt_src = None
-    twitter_src = None
-    custom_src = None
-    google_trends_src = None
-    print(f"[runtime] Initialized sources to None", flush=True)
+    def next_name(prefix: str) -> str:
+      idx = source_counter["value"]
+      source_counter["value"] += 1
+      return f"{prefix}:{idx}"
 
-    print(f"[runtime] Checking if ccxt in source_types: {'ccxt' in source_types}", flush=True)
-    if "ccxt" in source_types:
-      print(f"[runtime] YES, ccxt is in source_types", flush=True)
+    def normalize_symbols(raw: Any) -> list[str]:
+      if not raw:
+        return list(symbols)
+      if isinstance(raw, str):
+        return [raw]
+      return [sym for sym in raw if isinstance(sym, str) and sym]
 
-      # Collect all exchanges from CCXT sources
-      symbols_by_exchange: dict[str, set[str]] = defaultdict(set)
-      for source in spec.sources:
-        if source.get("type") == "ccxt" and source.get("exchange"):
-          ex_name = source["exchange"]
-          source_symbols = source.get("symbols") or symbols
-          if not source_symbols:
-            continue
-          for sym in source_symbols:
-            if sym:
-              symbols_by_exchange[ex_name].add(sym)
+    def extract_exchange_list(source_cfg: dict) -> list[str]:
+      exchanges: list[str] = []
+      ex_value = source_cfg.get("exchange")
+      if isinstance(ex_value, str):
+        exchanges.append(ex_value)
 
-      exchanges_to_use = {
-        ex_name: sorted(sym_set) for ex_name, sym_set in symbols_by_exchange.items()
-      }
+      ex_list = source_cfg.get("exchanges")
+      if isinstance(ex_list, list):
+        for item in ex_list:
+          if isinstance(item, str):
+            exchanges.append(item)
+          elif isinstance(item, dict) and isinstance(item.get("exchange"), str):
+            exchanges.append(item["exchange"])
 
-      if not exchanges_to_use:
-        print("[runtime] No CCXT exchanges configured after parsing sources", flush=True)
+      return exchanges
+
+    def add_ccxt_source(source_cfg: dict) -> None:
+      source_symbols = normalize_symbols(source_cfg.get("symbols"))
+      if not source_symbols:
+        source_symbols = [default_symbol]
+
+      candidates = self._build_exchange_preference(extract_exchange_list(source_cfg))
+      state = {"idx": 0}
+
+      def current_exchange() -> str:
+        return candidates[state["idx"] % len(candidates)]
+
+      market_type = source_cfg.get("market_type") or source_cfg.get("market")
+      if isinstance(market_type, str):
+        market_type = market_type.lower()
       else:
-        print(f"[runtime] Exchanges to use: {list(exchanges_to_use.keys())}")
-        print(f"[runtime] Symbols by exchange: {exchanges_to_use}")
+        market_type = "spot"
 
-        # Create merged stream for all symbols and all exchanges
-        async def merged_ccxt_stream():
-          queue = asyncio.Queue()
+      timeframe = interval_to_timeframe(interval)
+      use_candles = bool(timeframe) and interval >= 60
 
-          async def pump_exchange(ex_name: str, sym_list: list[str]):
-            try:
-              async for event in ccxt_ws_exchange_stream(ex_name, sym_list):
-                await queue.put(event)
-            except asyncio.CancelledError:
-              raise
-            except Exception as e:
-              print(f"[runtime] Error in stream for {ex_name}: {e}")
+      metadata = {
+        "symbols": list(source_symbols),
+        "fields": source_cfg.get("fields", []),
+        "exchanges": list(candidates),
+        "mode": "ohlcv" if use_candles else "trades",
+        "market_type": market_type,
+      }
+      if timeframe:
+        metadata["timeframe"] = timeframe
 
-          tasks = [
-            asyncio.create_task(pump_exchange(ex, sym_list))
-            for ex, sym_list in exchanges_to_use.items()
-            if sym_list
-          ]
+      name = next_name("ccxt")
 
-          total_symbol_subscriptions = sum(len(sym_list) for sym_list in exchanges_to_use.values())
+      def create_stream():
+        exchange = current_exchange()
+        metadata["active_exchange"] = exchange
+        if use_candles:
           print(
-            f"[runtime] Created {len(tasks)} exchange WebSocket streams covering "
-            f"{total_symbol_subscriptions} symbol subscriptions",
+            f"[runtime] Starting CCXT candle stream on {exchange} "
+            f"for symbols={source_symbols} timeframe={timeframe}",
+            flush=True,
+          )
+          return ccxt_ws_candle_stream(
+            exchange,
+            list(source_symbols),
+            interval,
+            market_type=market_type,
+          )
+
+        print(
+          f"[runtime] Starting CCXT trade stream on {exchange} for symbols={source_symbols}",
+          flush=True,
+        )
+        return ccxt_ws_exchange_stream(
+          exchange,
+          list(source_symbols),
+          market_type=market_type,
+        )
+
+      def on_failure(err: Exception) -> None:
+        previous = current_exchange()
+        state["idx"] = (state["idx"] + 1) % len(candidates)
+        new_exchange = current_exchange()
+        metadata["active_exchange"] = new_exchange
+        if new_exchange != previous:
+          print(
+            f"[runtime] CCXT failover {previous} -> {new_exchange}: {err}",
             flush=True,
           )
 
-          try:
-            while True:
-              yield await queue.get()
-          finally:
-            for task in tasks:
-              task.cancel()
-            await asyncio.gather(*tasks, return_exceptions=True)
+      pipeline_sources.append(
+        SourceConfig(
+          name=name,
+          type="ccxt",
+          create_stream=create_stream,
+          metadata=metadata,
+          on_failure=on_failure if len(candidates) > 1 else None,
+        )
+      )
 
-        ccxt_src = merged_ccxt_stream()
+    def add_twitter_source(source_cfg: dict) -> None:
+      source_symbols = normalize_symbols(source_cfg.get("symbols"))
+      symbol = source_symbols[0] if source_symbols else default_symbol
+      base_symbol = symbol.split("/")[0]
+      interval_override = int(source_cfg.get("interval_sec") or interval)
+      interval_override = max(1, interval_override)
+      bearer = source_cfg.get("bearer_token")
+
+      def create_stream():
         print(
-          "[runtime] Using merged WebSocket stream with shared exchange connections",
+          f"[runtime] Starting Twitter stream for {base_symbol} (interval={interval_override}s)",
           flush=True,
         )
+        return x_stream(base_symbol, bearer_token=bearer, interval=interval_override)
 
-    if "twitter" in source_types:
-      symbol = symbols[0].split("/")[0] if symbols else "BTC"
-      twitter_src = x_stream(symbol, interval=interval)
-
-    if "google_trends" in source_types:
-      # Find google_trends source config
-      trends_cfg = next((s for s in spec.sources if s["type"] == "google_trends"), {})
-      keywords = trends_cfg.get("keywords", [])
-      timeframe = trends_cfg.get("timeframe", "now 1-H")
-
-      # If no keywords specified, derive from symbols
-      if not keywords:
-        keywords = [sym.split("/")[0].lower() for sym in symbols] if symbols else ["bitcoin"]
-
-      print(f"[runtime] Google Trends source: keywords={keywords}, timeframe={timeframe}")
-      google_trends_src = google_trends_stream(keywords, interval, timeframe)
-
-    # Handle on-chain source (maps to custom_src for pipeline compatibility)
-    if "onchain" in source_types or "onchain.grpc" in source_types:
-      # Find onchain source config
-      onchain_cfg = next(
-        (s for s in spec.sources if s["type"] in ["onchain", "onchain.grpc"]),
-        {}
+      pipeline_sources.append(
+        SourceConfig(
+          name=next_name("twitter"),
+          type="twitter",
+          create_stream=create_stream,
+          metadata={
+            "symbol": base_symbol,
+            "interval_sec": interval_override,
+          },
+        )
       )
-      chain = onchain_cfg.get("chain", "sol")
-      event_types = onchain_cfg.get("event_types", ["tx", "transfer"])
-      custom_src = onchain_stream(chain, event_types, interval)
-    elif "google_trends" in source_types:
-      # Map Google Trends to custom_src for pipeline compatibility
-      custom_src = google_trends_src
-    elif "custom" in source_types:
-      # Find custom source config
-      custom_cfg = next((s for s in spec.sources if s["type"] == "custom"), {})
-      mode = custom_cfg.get("mode", "mock_liq")
-      custom_src = custom_stream(mode, {"symbol": symbols[0] if symbols else "BTC/USDT", "interval": interval})
 
-    # If no sources specified, use all three (ccxt + twitter + onchain)
-    print(f"[runtime] Before fallback check: ccxt_src={ccxt_src}, twitter_src={twitter_src}, custom_src={custom_src}", flush=True)
-    print(f"[runtime] any([ccxt_src, twitter_src, custom_src]) = {any([ccxt_src, twitter_src, custom_src])}", flush=True)
-    if not any([ccxt_src, twitter_src, custom_src]):
-      print(f"[runtime] FALLBACK: No sources set, using defaults with REST polling!", flush=True)
-      symbol = symbols[0] if symbols else "BTC/USDT"
-      ccxt_src = ccxt_poll_stream(symbol, interval)
-      twitter_src = x_stream(symbol.split("/")[0], interval=interval)
-      custom_src = onchain_stream("sol", ["tx", "transfer"], interval)
+    def add_google_trends_source(source_cfg: dict) -> None:
+      keywords = source_cfg.get("keywords")
+      if not keywords:
+        keywords = [sym.split("/")[0].lower() for sym in symbols]
+      timeframe = source_cfg.get("timeframe", "now 1-H")
+      trends_interval = int(source_cfg.get("interval_sec") or max(interval, 60))
+      trends_interval = max(30, trends_interval)
 
-    # Create empty generators for missing sources
-    async def empty_stream():
-      while True:
-        await asyncio.sleep(999999)
-        yield  # Never actually yields
+      def create_stream():
+        print(
+          "[runtime] Starting Google Trends stream "
+          f"keywords={keywords} timeframe={timeframe} interval={trends_interval}",
+          flush=True,
+        )
+        return google_trends_stream(list(keywords), trends_interval, timeframe)
 
-    # Ensure all sources have values (use empty stream if None)
-    ccxt_src = ccxt_src or empty_stream()
-    twitter_src = twitter_src or empty_stream()
-    custom_src = custom_src or empty_stream()
+      pipeline_sources.append(
+        SourceConfig(
+          name=next_name("google_trends"),
+          type="google_trends",
+          create_stream=create_stream,
+          metadata={
+            "keywords": list(keywords),
+            "timeframe": timeframe,
+            "interval_sec": trends_interval,
+          },
+        )
+      )
 
-    # Create pipeline
-    pipeline = ThreeSourcePipeline(stream_id, interval, self.dispatcher)
+    def add_onchain_source(source_cfg: dict) -> None:
+      chain = source_cfg.get("chain", "sol")
+      event_types = source_cfg.get("event_types", ["tx", "transfer"])
+      interval_override = int(source_cfg.get("interval_sec") or interval)
+      interval_override = max(1, interval_override)
 
-    # Run pipeline (will block until cancelled)
+      def create_stream():
+        print(
+          f"[runtime] Starting on-chain stream chain={chain} events={event_types}",
+          flush=True,
+        )
+        return onchain_stream(chain, list(event_types), interval_override)
+
+      pipeline_sources.append(
+        SourceConfig(
+          name=next_name("onchain"),
+          type="onchain",
+          create_stream=create_stream,
+          metadata={
+            "chain": chain,
+            "event_types": list(event_types),
+            "interval_sec": interval_override,
+          },
+        )
+      )
+
+    def add_custom_source(source_cfg: dict) -> None:
+      mode = source_cfg.get("mode", "mock_liq")
+      base_config = dict(source_cfg.get("config") or {})
+      base_config.setdefault("symbol", default_symbol)
+      base_config.setdefault("interval", max(1, int(interval)))
+
+      def create_stream():
+        print(f"[runtime] Starting custom stream mode={mode}", flush=True)
+        return custom_stream(mode, dict(base_config))
+
+      pipeline_sources.append(
+        SourceConfig(
+          name=next_name("custom"),
+          type="custom",
+          create_stream=create_stream,
+          metadata={
+            "mode": mode,
+            **{k: v for k, v in base_config.items() if k in {"symbol", "interval"}},
+          },
+        )
+      )
+
+    handlers = {
+      "ccxt": add_ccxt_source,
+      "twitter": add_twitter_source,
+      "google_trends": add_google_trends_source,
+      "onchain": add_onchain_source,
+      "onchain.grpc": add_onchain_source,
+      "custom": add_custom_source,
+    }
+
+    for source in spec.sources:
+      source_type = source.get("type")
+      handler = handlers.get(source_type)
+      if handler:
+        handler(source)
+      else:
+        print(f"[runtime] Unsupported source type '{source_type}' - skipping", flush=True)
+
+    if not pipeline_sources:
+      print("[runtime] FALLBACK: No sources provided, using default bundle", flush=True)
+      add_ccxt_source({"symbols": symbols})
+      add_twitter_source({})
+      add_onchain_source({})
+
+    pipeline = MultiSourcePipeline(stream_id, interval, self.dispatcher)
+
     try:
-      print(f"[runtime] Starting pipeline ingest for {stream_id}")
-      print(f"[runtime] Passing to pipeline: ccxt_src={ccxt_src}, twitter_src={twitter_src}, custom_src={custom_src}", flush=True)
-      await pipeline.ingest(ccxt_src, twitter_src, custom_src)
+      print(
+        f"[runtime] Starting pipeline ingest for {stream_id} with "
+        f"sources={[cfg.name for cfg in pipeline_sources]}",
+        flush=True,
+      )
+      await pipeline.ingest(pipeline_sources)
     except asyncio.CancelledError:
-      # Clean shutdown
       print(f"[runtime] Stream {stream_id} cancelled")
-      pass
+      raise
     except Exception as e:
       print(f"[runtime] Stream {stream_id} error: {e}")
       import traceback
@@ -225,6 +335,34 @@ class StreamRuntime:
       # Cleanup
       if stream_id in self.active_streams:
         del self.active_streams[stream_id]
+
+  def _build_exchange_preference(self, requested: list[str] | None) -> list[str]:
+    """
+    Build ordered list of exchanges with fallbacks.
+
+    Preference order:
+      1. User-requested exchanges (in provided order)
+      2. Binance
+      3. BinanceUS
+      4. Kraken
+      5. Kucoin (final catch-all)
+    """
+    preference: list[str] = []
+    if requested:
+      for ex in requested:
+        if isinstance(ex, str):
+          ex_lower = ex.lower()
+          if ex_lower not in preference:
+            preference.append(ex_lower)
+
+    for ex in BASE_EXCHANGE_PREFERENCE:
+      if ex not in preference:
+        preference.append(ex)
+
+    if "kraken" not in preference:
+      preference.append("kraken")
+
+    return preference
 
   async def stop_stream(self, stream_id: str) -> None:
     """

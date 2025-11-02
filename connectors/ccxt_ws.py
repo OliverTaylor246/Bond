@@ -7,17 +7,172 @@ Latency: ~50-200ms (vs 1-6 seconds for REST polling)
 import asyncio
 from datetime import datetime, timezone
 from typing import Any, AsyncIterator, Optional
+import ccxt
 import ccxt.pro as ccxtpro
 from engine.schemas import TradeEvent
 
 
-EXCHANGES = ["kraken", "kucoin"]
+EXCHANGES = ["binance", "binanceus", "kraken", "kucoin"]
+
+INTERVAL_TO_TIMEFRAME = {
+  1: "1s",
+  5: "5s",
+  10: "10s",
+  15: "15s",
+  30: "30s",
+  60: "1m",
+  120: "2m",
+  180: "3m",
+  300: "5m",
+  600: "10m",
+  900: "15m",
+  1200: "20m",
+  1800: "30m",
+  2700: "45m",
+  3600: "1h",
+  7200: "2h",
+  14400: "4h",
+  21600: "6h",
+  43200: "12h",
+  86400: "1d",
+}
+
+
+def normalize_market_type(market_type: Optional[str]) -> Optional[str]:
+  if not market_type:
+    return None
+
+  mt = market_type.lower()
+  mapping = {
+    "spot": "spot",
+    "margin": "margin",
+    "future": "future",
+    "futures": "future",
+    "swap": "swap",
+    "perp": "swap",
+    "perpetual": "swap",
+  }
+  return mapping.get(mt, mt)
+
+
+def build_stream_params(market_type: Optional[str]) -> dict[str, Any]:
+  normalized = normalize_market_type(market_type)
+  if normalized in {"future", "swap", "margin"}:
+    return {"type": normalized}
+  return {}
+
+
+def create_pro_client(exchange: str, market_type: Optional[str] = None):
+  exchange_class = getattr(ccxtpro, exchange)
+  params: dict[str, Any] = {}
+  normalized = normalize_market_type(market_type)
+
+  if normalized and normalized not in {"spot"}:
+    params["options"] = {"defaultType": normalized}
+
+  return exchange_class(params)
+
+
+def create_rest_client(exchange: str, market_type: Optional[str] = None):
+  exchange_class = getattr(ccxt, exchange)
+  params: dict[str, Any] = {}
+  normalized = normalize_market_type(market_type)
+
+  if normalized and normalized not in {"spot"}:
+    params["options"] = {"defaultType": normalized}
+
+  return exchange_class(params)
+
+
+def interval_to_timeframe(interval_sec: float | int | None) -> Optional[str]:
+  """
+  Convert aggregation interval (seconds) into exchange timeframe string.
+
+  Returns None if no reasonable mapping is found.
+  """
+  if not interval_sec:
+    return None
+
+  rounded = int(round(float(interval_sec)))
+  return INTERVAL_TO_TIMEFRAME.get(rounded)
+
+
+def _candle_to_event(
+  exchange_id: str,
+  symbol: str,
+  candle: list[Any],
+  timeframe: str,
+) -> dict[str, Any]:
+  """
+  Convert an OHLCV candle into the event structure used by the pipeline.
+  """
+  if not candle:
+    raise ValueError("Empty OHLCV candle")
+
+  ts_ms, open_, high, low, close, volume = candle[:6]
+  ts = datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc)
+  event: dict[str, Any] = {
+    "ts": ts,
+    "source": exchange_id,
+    "symbol": symbol,
+    "price": close,
+    "open": open_,
+    "high": high,
+    "low": low,
+    "close": close,
+    "qty": volume,
+    "base_volume": volume,
+    "timeframe": timeframe,
+  }
+
+  if close is not None and volume is not None:
+    event["volume"] = close * volume
+
+  return event
+
+
+def _ticker_to_event(
+  exchange_id: str,
+  symbol: str,
+  ticker: dict[str, Any],
+) -> dict[str, Any]:
+  ts = ticker.get("timestamp")
+  ts_dt = datetime.fromtimestamp(ts / 1000, tz=timezone.utc) if ts else datetime.now(tz=timezone.utc)
+
+  last = ticker.get("last") or ticker.get("close")
+  base_volume = ticker.get("baseVolume") or ticker.get("baseVolume24h")
+  quote_volume = ticker.get("quoteVolume") or ticker.get("quoteVolume24h")
+
+  event: dict[str, Any] = {
+    "ts": ts_dt,
+    "source": exchange_id,
+    "symbol": symbol,
+    "price": last,
+    "bid": ticker.get("bid"),
+    "ask": ticker.get("ask"),
+    "high": ticker.get("high"),
+    "low": ticker.get("low"),
+    "open": ticker.get("open"),
+    "close": ticker.get("close") or last,
+  }
+
+  if base_volume is not None:
+    event["qty"] = base_volume
+    event["base_volume"] = base_volume
+
+  if last is not None and base_volume is not None:
+    event["volume"] = base_volume * last
+  elif quote_volume is not None:
+    event["volume"] = quote_volume
+
+  return event
 
 
 async def ccxt_ws_stream(
   symbol: str = "BTC/USDT",
-  exchange: str = "kraken",
+  exchange: str = "binance",
   exchange_instance: Optional[Any] = None,
+  market_type: Optional[str] = None,
 ) -> AsyncIterator[dict]:
   """
   Stream real-time trade data via WebSocket from a single exchange.
@@ -34,12 +189,18 @@ async def ccxt_ws_stream(
 
   manage_lifecycle = exchange_instance is None
 
+  params = build_stream_params(market_type)
+  watch_trades_args = {
+    "since": None,
+    "limit": None,
+    "params": params,
+  }
+
   if manage_lifecycle:
     print(f"[ccxt_ws] Getting exchange class for {exchange}", flush=True)
-    exchange_class = getattr(ccxtpro, exchange)
-    print(f"[ccxt_ws] Creating exchange instance", flush=True)
-    ex = exchange_class()
+    ex = create_pro_client(exchange, market_type)
     print(f"[ccxt_ws] Exchange instance created: {ex}", flush=True)
+    await ex.load_markets()
   else:
     ex = exchange_instance
     print(f"[ccxt_ws] Reusing provided exchange instance for {exchange}", flush=True)
@@ -51,7 +212,12 @@ async def ccxt_ws_stream(
     while True:
       try:
         # Watch trades (higher frequency than ticker)
-        trades = await ex.watch_trades(symbol)
+        trades = await ex.watch_trades(
+          symbol,
+          watch_trades_args["since"],
+          watch_trades_args["limit"],
+          watch_trades_args["params"],
+        )
 
         # Get latest trade from the list
         if trades:
@@ -76,6 +242,9 @@ async def ccxt_ws_stream(
 
           # Add extended fields
           evt_dict = evt.model_dump()
+          evt_dict["base_volume"] = evt_dict.get("qty")
+          if evt_dict.get("price") is not None and evt_dict.get("qty") is not None:
+            evt_dict["volume"] = evt_dict["price"] * evt_dict["qty"]
           evt_dict["bid"] = ticker_data.get("bid")
           evt_dict["ask"] = ticker_data.get("ask")
           evt_dict["high"] = ticker_data.get("high")
@@ -99,28 +268,192 @@ async def ccxt_ws_stream(
 async def ccxt_ws_exchange_stream(
   exchange: str,
   symbols: list[str],
+  market_type: Optional[str] = None,
+) -> AsyncIterator[dict]:
+  """Stream ticker/price updates for multiple symbols on a single exchange."""
+  if not symbols:
+    return
+
+  print(
+    f"[ccxt_ws] Starting shared stream for {exchange} with symbols={symbols} "
+    f"market_type={market_type}",
+    flush=True,
+  )
+
+  ex = create_pro_client(exchange, market_type)
+  await ex.load_markets()
+  if not getattr(ex, "has", {}).get("watchOHLCV"):
+    raise RuntimeError(f"Exchange {exchange} does not support watchOHLCV")
+  params = build_stream_params(market_type)
+
+  capabilities = getattr(ex, "has", {}) or {}
+  supports_batch = bool(capabilities.get("watchTickers"))
+  supports_single = bool(capabilities.get("watchTicker"))
+  supports_trades = bool(capabilities.get("watchTrades"))
+
+  if not any([supports_batch, supports_single, supports_trades]):
+    raise RuntimeError(
+      f"Exchange {exchange} does not support watchTickers/watchTicker/watchTrades"
+    )
+
+  try:
+    if supports_batch and len(symbols) > 1:
+      while True:
+        try:
+          tickers = await ex.watch_tickers(symbols, params)
+          for sym, ticker in tickers.items():
+            if not ticker:
+              continue
+            yield _ticker_to_event(ex.id, sym, ticker)
+        except asyncio.CancelledError:
+          raise
+        except Exception as err:
+          print(f"[ccxt_ws] watch_tickers error {exchange}: {err}", flush=True)
+          await asyncio.sleep(1.0)
+    else:
+      queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+
+      async def seed_ticker(sym: str) -> None:
+        try:
+          rest_exchange = create_rest_client(exchange, market_type)
+          try:
+            ticker = await asyncio.to_thread(
+              rest_exchange.fetch_ticker,
+              sym,
+              params,
+            )
+            if ticker:
+              await queue.put(_ticker_to_event(rest_exchange.id, sym, ticker))
+          finally:
+            close_fn = getattr(rest_exchange, "close", None)
+            if callable(close_fn):
+              close_fn()
+        except Exception as err:
+          print(f"[ccxt_ws] Seed ticker error {exchange} {sym}: {err}", flush=True)
+
+      async def pump_watch_ticker(sym: str) -> None:
+        while True:
+          try:
+            ticker = await ex.watch_ticker(sym, params)
+            if ticker:
+              await queue.put(_ticker_to_event(ex.id, sym, ticker))
+          except asyncio.CancelledError:
+            raise
+          except Exception as err:
+            print(f"[ccxt_ws] watch_ticker error {exchange} {sym}: {err}", flush=True)
+            await asyncio.sleep(1.0)
+
+      async def pump_trades(sym: str) -> None:
+        try:
+          async for event in ccxt_ws_stream(
+            sym,
+            exchange,
+            exchange_instance=ex,
+            market_type=market_type,
+          ):
+            await queue.put(event)
+        except asyncio.CancelledError:
+          raise
+        except Exception as err:
+          print(f"[ccxt_ws] Pump trades error {exchange} {sym}: {err}", flush=True)
+
+      seed_tasks = [asyncio.create_task(seed_ticker(sym)) for sym in symbols]
+      tasks: list[asyncio.Task] = []
+      if supports_single:
+        tasks = [asyncio.create_task(pump_watch_ticker(sym)) for sym in symbols]
+      elif supports_trades:
+        tasks = [asyncio.create_task(pump_trades(sym)) for sym in symbols]
+      else:
+        raise RuntimeError(
+          f"Exchange {exchange} lacks watchTicker but also cannot fallback to trades"
+        )
+
+      try:
+        while True:
+          event = await queue.get()
+          yield event
+      finally:
+        for seed in seed_tasks:
+          seed.cancel()
+        await asyncio.gather(*seed_tasks, return_exceptions=True)
+        for task in tasks:
+          task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+  finally:
+    await ex.close()
+    print(f"[ccxt_ws] Closed shared {exchange} WebSocket", flush=True)
+
+
+async def ccxt_ws_candle_stream(
+  exchange: str,
+  symbols: list[str],
+  interval_sec: float,
+  market_type: Optional[str] = None,
 ) -> AsyncIterator[dict]:
   """
-  Stream all requested symbols for a single exchange using one shared connection.
+  Stream OHLCV candles for the requested symbols and deliver an immediate snapshot.
   """
   if not symbols:
     return
 
-  print(f"[ccxt_ws] Starting shared stream for {exchange} with symbols={symbols}", flush=True)
-  exchange_class = getattr(ccxtpro, exchange)
-  ex = exchange_class()
-  queue = asyncio.Queue()
+  timeframe = interval_to_timeframe(interval_sec)
+  if not timeframe:
+    raise ValueError(f"No timeframe mapping for interval {interval_sec}s")
 
-  async def pump_symbol(sym: str):
+  print(
+    f"[ccxt_ws] Starting candle stream for {exchange} timeframe={timeframe} symbols={symbols}",
+    flush=True,
+  )
+
+  ex = create_pro_client(exchange, market_type)
+  await ex.load_markets()
+  queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+  params = build_stream_params(market_type)
+
+  async def seed_symbol(sym: str) -> None:
+    """Fetch the most recent closed candle to populate data immediately."""
     try:
-      async for event in ccxt_ws_stream(sym, exchange, exchange_instance=ex):
-        await queue.put(event)
+      candles = await ex.fetch_ohlcv(sym, timeframe, limit=1, params=params)
+      if candles:
+        await queue.put(_candle_to_event(ex.id, sym, candles[-1], timeframe))
+    except AttributeError:
+      rest_exchange = create_rest_client(exchange, market_type)
+      try:
+        candles = await asyncio.to_thread(
+          rest_exchange.fetch_ohlcv,
+          sym,
+          timeframe,
+          None,
+          1,
+          params,
+        )
+        if candles:
+          await queue.put(
+            _candle_to_event(rest_exchange.id, sym, candles[-1], timeframe)
+          )
+      finally:
+        close_fn = getattr(rest_exchange, "close", None)
+        if callable(close_fn):
+          close_fn()
     except asyncio.CancelledError:
       raise
     except Exception as err:
-      print(f"[ccxt_ws] Pump error for {exchange} {sym}: {err}", flush=True)
+      print(f"[ccxt_ws] Seed candle error {exchange} {sym}: {err}", flush=True)
 
-  tasks = [asyncio.create_task(pump_symbol(sym)) for sym in symbols]
+  async def watch_symbol(sym: str) -> None:
+    """Subscribe to live candle updates and forward the latest data."""
+    try:
+      async for candles in ex.watch_ohlcv(sym, timeframe, params=params):
+        if candles:
+          await queue.put(_candle_to_event(ex.id, sym, candles[-1], timeframe))
+    except asyncio.CancelledError:
+      raise
+    except Exception as err:
+      print(f"[ccxt_ws] watch_ohlcv error {exchange} {sym}: {err}", flush=True)
+
+  seed_tasks = [asyncio.create_task(seed_symbol(sym)) for sym in symbols]
+  watch_tasks = [asyncio.create_task(watch_symbol(sym)) for sym in symbols]
+  tasks = seed_tasks + watch_tasks
 
   try:
     while True:
@@ -131,7 +464,7 @@ async def ccxt_ws_exchange_stream(
       task.cancel()
     await asyncio.gather(*tasks, return_exceptions=True)
     await ex.close()
-    print(f"[ccxt_ws] Closed shared {exchange} WebSocket", flush=True)
+    print(f"[ccxt_ws] Closed candle stream for {exchange}", flush=True)
 
 
 async def ccxt_ws_multi_stream(
