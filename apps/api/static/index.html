@@ -3,24 +3,24 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Bond Terminal - Real-time Market Intelligence</title>
+  <title>Bond Terminal · Stream Console</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <style>
     :root {
-      --bg-primary: #0a0e17;
-      --bg-secondary: #111827;
-      --bg-tertiary: #1a1f2e;
-      --bg-card: #151b28;
-      --border-color: #1f2937;
-      --accent-blue: #3b82f6;
-      --accent-green: #10b981;
-      --accent-red: #ef4444;
-      --accent-purple: #8b5cf6;
-      --text-primary: #f9fafb;
-      --text-secondary: #9ca3af;
-      --text-muted: #6b7280;
+      --bg: #060b16;
+      --panel: #0e1627;
+      --panel-strong: #111c33;
+      --border: #1f2f4a;
+      --accent: #3b82f6;
+      --accent-soft: rgba(59, 130, 246, 0.18);
+      --success: #16a34a;
+      --warn: #d97706;
+      --error: #dc2626;
+      --text: #e6ecff;
+      --text-muted: #8aa1c5;
+      --mono: 'JetBrains Mono', monospace;
     }
 
     * {
@@ -30,1318 +30,1164 @@
     }
 
     body {
-      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-      background: var(--bg-primary);
-      color: var(--text-primary);
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Inter', sans-serif;
       min-height: 100vh;
-      overflow-x: hidden;
+      display: flex;
+      flex-direction: column;
     }
 
-    /* Header / Navigation */
-    .header {
-      background: var(--bg-secondary);
-      border-bottom: 1px solid var(--border-color);
-      padding: 0 32px;
-      height: 64px;
+    header {
+      height: 62px;
+      border-bottom: 1px solid rgba(31, 47, 74, 0.85);
+      background: #0b1323;
       display: flex;
       align-items: center;
       justify-content: space-between;
-      position: sticky;
-      top: 0;
-      z-index: 100;
-      backdrop-filter: blur(10px);
+      padding: 0 28px;
     }
 
-    .logo {
+    header .brand {
       display: flex;
       align-items: center;
-      gap: 12px;
-      font-size: 24px;
-      font-weight: 700;
-      background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple));
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      letter-spacing: -0.5px;
+      gap: 16px;
     }
 
-    .header-stats {
-      display: flex;
-      gap: 32px;
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 13px;
-    }
-
-    .stat-item {
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-    }
-
-    .stat-label {
-      color: var(--text-muted);
-      font-size: 11px;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-    }
-
-    .stat-value {
-      color: var(--text-primary);
+    header .brand h1 {
+      font-size: 20px;
       font-weight: 600;
+      letter-spacing: -0.02em;
     }
 
-    /* Main Layout */
-    .main-container {
-      display: grid;
-      grid-template-columns: 380px 1fr;
-      height: calc(100vh - 64px);
-      overflow: hidden;
-    }
-
-    /* Left Panel - Configuration */
-    .config-panel {
-      background: var(--bg-secondary);
-      border-right: 1px solid var(--border-color);
-      overflow-y: auto;
-      padding: 24px;
-    }
-
-    .config-panel::-webkit-scrollbar {
-      width: 8px;
-    }
-
-    .config-panel::-webkit-scrollbar-track {
-      background: var(--bg-tertiary);
-    }
-
-    .config-panel::-webkit-scrollbar-thumb {
-      background: var(--border-color);
-      border-radius: 4px;
-    }
-
-    .panel-section {
-      margin-bottom: 28px;
-      padding-bottom: 28px;
-      border-bottom: 1px solid var(--border-color);
-    }
-
-    .panel-section:last-child {
-      border-bottom: none;
-    }
-
-    .section-header {
+    header nav {
       display: flex;
+      gap: 10px;
       align-items: center;
-      gap: 8px;
-      margin-bottom: 16px;
-      color: var(--text-primary);
+    }
+
+    header button,
+    header a {
+      border: 1px solid rgba(59, 130, 246, 0.28);
+      background: rgba(13, 21, 36, 0.85);
+      color: var(--text);
       font-size: 13px;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-    }
-
-    .section-number {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      width: 20px;
-      height: 20px;
-      background: var(--accent-blue);
-      color: white;
-      border-radius: 4px;
-      font-size: 11px;
-      font-weight: 700;
-    }
-
-    /* Form Elements */
-    select, input[type="number"], input[type="text"] {
-      width: 100%;
-      background: var(--bg-tertiary);
-      border: 1px solid var(--border-color);
-      color: var(--text-primary);
-      padding: 10px 12px;
-      border-radius: 6px;
-      font-size: 14px;
-      font-family: 'Inter', sans-serif;
-      transition: all 0.2s;
-    }
-
-    select:focus, input:focus {
-      outline: none;
-      border-color: var(--accent-blue);
-      background: var(--bg-card);
-    }
-
-    select option {
-      background: var(--bg-tertiary);
-      color: var(--text-primary);
-    }
-
-    /* Buttons */
-    .btn {
-      padding: 10px 16px;
-      border: none;
-      border-radius: 6px;
-      font-size: 13px;
-      font-weight: 600;
-      cursor: pointer;
-      transition: all 0.2s;
-      font-family: 'Inter', sans-serif;
+      padding: 8px 14px;
+      border-radius: 10px;
       display: inline-flex;
       align-items: center;
       gap: 8px;
+      cursor: pointer;
+      text-decoration: none;
+      transition: transform 0.15s ease, background 0.15s ease;
     }
 
-    .btn-primary {
-      background: var(--accent-blue);
-      color: white;
+    header button.primary {
+      background: linear-gradient(135deg, rgba(59,130,246,0.9), rgba(37,99,235,0.85));
+      border-color: rgba(59,130,246,0.55);
+      box-shadow: 0 10px 24px rgba(59,130,246,0.25);
     }
 
-    .btn-primary:hover {
-      background: #2563eb;
+    header button:hover,
+    header a:hover {
       transform: translateY(-1px);
-      box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+      background: rgba(27, 39, 58, 0.95);
     }
 
-    .btn-success {
-      background: var(--accent-green);
-      color: white;
-      width: 100%;
-      padding: 14px;
-      font-size: 14px;
-      margin-top: 8px;
+    header button.primary:hover {
+      transform: translateY(-2px);
     }
 
-    .btn-success:hover {
-      background: #059669;
-      transform: translateY(-1px);
-      box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
-    }
-
-    .btn-secondary {
-      background: var(--bg-tertiary);
-      color: var(--text-secondary);
-      border: 1px solid var(--border-color);
-    }
-
-    .btn-secondary:hover {
-      background: var(--bg-card);
-      border-color: var(--accent-blue);
-      color: var(--text-primary);
-    }
-
-    .btn-danger {
-      background: transparent;
-      color: var(--accent-red);
-      border: 1px solid var(--accent-red);
-      padding: 6px 12px;
-      font-size: 12px;
-    }
-
-    .btn-danger:hover {
-      background: var(--accent-red);
-      color: white;
-    }
-
-    /* Exchange Cards */
-    .exchange-buttons {
+    main {
+      flex: 1;
       display: flex;
-      gap: 8px;
-      margin-bottom: 16px;
-      flex-wrap: wrap;
+      min-height: 0;
     }
 
-    .exchange-card {
-      background: var(--bg-card);
-      border: 1px solid var(--border-color);
-      border-radius: 8px;
-      padding: 16px;
-      margin-top: 12px;
+    .left-pane {
+      width: 360px;
+      border-right: 1px solid rgba(31, 47, 74, 0.8);
+      background: rgba(10, 17, 30, 0.92);
+      display: flex;
+      flex-direction: column;
     }
 
-    .exchange-header {
+    .session-list {
+      padding: 18px 16px;
+      border-bottom: 1px solid rgba(31,47,74,0.7);
       display: flex;
       justify-content: space-between;
       align-items: center;
-      margin-bottom: 14px;
-      padding-bottom: 12px;
-      border-bottom: 1px solid var(--border-color);
     }
 
-    .exchange-name {
-      font-size: 14px;
-      font-weight: 700;
-      color: var(--accent-blue);
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
+    .session-list h2 {
+      font-size: 15px;
+      font-weight: 600;
+      letter-spacing: 0.02em;
     }
 
-    /* Field Selection */
-    .fields-grid {
-      display: grid;
-      grid-template-columns: repeat(2, 1fr);
-      gap: 8px;
-    }
-
-    .field-item {
-      background: var(--bg-tertiary);
-      border: 1px solid var(--border-color);
-      padding: 8px 10px;
-      border-radius: 6px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      cursor: pointer;
-      transition: all 0.2s;
-    }
-
-    .field-item:hover {
-      background: var(--bg-secondary);
-      border-color: var(--accent-blue);
-    }
-
-    .field-item input[type="checkbox"] {
-      cursor: pointer;
-      accent-color: var(--accent-blue);
-    }
-
-    .field-item label {
-      cursor: pointer;
-      font-size: 12px;
-      color: var(--text-secondary);
-      font-weight: 500;
-    }
-
-    /* Right Panel - Data Display */
-    .data-panel {
-      background: var(--bg-primary);
+    .sessions {
+      flex: 1;
       overflow-y: auto;
-      padding: 24px;
-    }
-
-    .data-panel::-webkit-scrollbar {
-      width: 8px;
-    }
-
-    .data-panel::-webkit-scrollbar-track {
-      background: var(--bg-tertiary);
-    }
-
-    .data-panel::-webkit-scrollbar-thumb {
-      background: var(--border-color);
-      border-radius: 4px;
-    }
-
-    /* Performance Stats Bar */
-    .perf-stats {
-      background: var(--bg-secondary);
-      border: 1px solid var(--border-color);
-      border-radius: 8px;
-      padding: 20px 24px;
-      margin-bottom: 24px;
-      display: none;
-    }
-
-    .perf-stats.active {
-      display: block;
-    }
-
-    .perf-grid {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 24px;
-    }
-
-    .perf-item {
+      padding: 16px;
       display: flex;
       flex-direction: column;
-      gap: 6px;
+      gap: 12px;
     }
 
-    .perf-label {
-      font-size: 11px;
+    .session-item {
+      padding: 14px;
+      border-radius: 12px;
+      border: 1px solid rgba(59, 130, 246, 0.22);
+      background: rgba(59, 130, 246, 0.08);
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      transition: transform 0.15s ease, border 0.15s ease;
+    }
+
+    .session-item.active,
+    .session-item:hover {
+      transform: translateY(-2px);
+      border-color: rgba(59,130,246,0.4);
+      background: rgba(59, 130, 246, 0.12);
+    }
+
+    .session-item span {
+      font-size: 12px;
       color: var(--text-muted);
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
     }
 
-    .perf-value {
-      font-size: 24px;
-      font-weight: 700;
-      font-family: 'JetBrains Mono', monospace;
-      color: var(--text-primary);
+    .chat-log {
+      height: 260px;
+      overflow-y: auto;
+      padding: 14px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      border-top: 1px solid rgba(31, 47, 74, 0.6);
+      border-bottom: 1px solid rgba(31, 47, 74, 0.6);
     }
 
-    .perf-value.green { color: var(--accent-green); }
-    .perf-value.blue { color: var(--accent-blue); }
-    .perf-value.gray { color: var(--text-muted); }
-
-    /* Data Grid */
-    .data-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-      gap: 16px;
-      display: none;
+    .chat-msg {
+      display: flex;
+      gap: 8px;
+      font-size: 13px;
+      animation: fadeIn 0.12s ease-out;
     }
 
-    .data-grid.active {
-      display: grid;
-    }
+    .chat-msg.agent { flex-direction: row; }
+    .chat-msg.user { flex-direction: row-reverse; }
 
-    .data-tile {
-      background: var(--bg-secondary);
-      border: 1px solid var(--border-color);
+    .avatar {
+      width: 26px;
+      height: 26px;
       border-radius: 8px;
-      padding: 20px;
-      transition: all 0.2s;
+      display: grid;
+      place-items: center;
+      background: rgba(59, 130, 246, 0.18);
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: 0.06em;
+      color: var(--accent);
+    }
+
+    .chat-msg.agent .avatar {
+      background: rgba(59, 130, 246, 0.35);
+      color: #f8fbff;
+    }
+
+    .bubble {
+      max-width: 80%;
+      background: rgba(15, 24, 39, 0.92);
+      border: 1px solid rgba(59, 130, 246, 0.18);
+      border-radius: 10px;
+      padding: 10px 12px;
+      line-height: 1.5;
+    }
+
+    .chat-msg.user .bubble {
+      background: rgba(59, 130, 246, 0.12);
+      border-color: rgba(59, 130, 246, 0.25);
+      color: #dbeafe;
+    }
+
+    .chat-input {
+      border-bottom: 1px solid rgba(31,47,74,0.6);
+      padding: 12px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .chat-input textarea {
+      height: 110px;
+      resize: none;
+      border-radius: 10px;
+      background: rgba(9, 15, 27, 0.9);
+      border: 1px solid rgba(45, 64, 96, 0.8);
+      color: var(--text);
+      padding: 10px 12px;
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    .chat-input textarea:focus {
+      outline: none;
+      border-color: rgba(59,130,246,0.5);
+      box-shadow: 0 0 0 1px rgba(59,130,246,0.15);
+      background: rgba(13,22,37,0.95);
+    }
+
+    .chat-input button {
+      align-self: flex-end;
+      border-radius: 10px;
+      border: 1px solid rgba(59,130,246,0.35);
+      background: rgba(59,130,246,0.16);
+      color: #dbeafe;
+      padding: 6px 12px;
+      font-size: 12px;
+      cursor: pointer;
+    }
+
+    .detail-pane {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .detail-header {
+      padding: 20px 30px;
+      border-bottom: 1px solid rgba(31, 47, 74, 0.75);
+      background: rgba(12, 18, 31, 0.98);
+      display: flex;
+      justify-content: space-between;
+      gap: 40px;
+    }
+
+    .detail-header .summary {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .summary h2 {
+      font-size: 22px;
+      font-weight: 600;
+      letter-spacing: -0.015em;
+    }
+
+    .summary meta-row {
+      display: flex;
+      gap: 16px;
+      font-size: 13px;
+      color: var(--text-muted);
+    }
+
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-family: var(--mono);
+      font-size: 12px;
+      padding: 6px 12px;
+      border-radius: 999px;
+      border: 1px solid rgba(16, 185, 129, 0.35);
+      background: rgba(16, 185, 129, 0.18);
+      color: #bef5d2;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+
+    .detail-body {
+      padding: 24px 26px;
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 20px;
+      align-items: start;
+      overflow-y: auto;
+      max-height: calc(100vh - 62px - 80px);
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      padding: 22px 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+      box-shadow: 0 14px 34px rgba(6, 12, 24, 0.45);
+    }
+
+    .panel h3 {
+      font-size: 15px;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+      color: #c5d8ff;
+    }
+
+    .panel dl {
+      display: grid;
+      grid-template-columns: minmax(120px, 0.4fr) 1fr;
+      row-gap: 10px;
+      column-gap: 12px;
+      font-size: 13px;
+    }
+
+    .panel dt {
+      color: var(--text-muted);
+      font-family: var(--mono);
+      letter-spacing: 0.02em;
+    }
+
+    .panel dd {
+      font-family: var(--mono);
+      color: #dce7ff;
+    }
+
+    .code-block {
+      background: #080f1f;
+      border: 1px solid rgba(59,130,246,0.22);
+      border-radius: 12px;
+      padding: 12px 0 0 0;
       position: relative;
       overflow: hidden;
     }
 
-    .data-tile::before {
-      content: '';
+    .code-block button {
       position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 3px;
-      background: linear-gradient(90deg, var(--accent-blue), var(--accent-purple));
-      opacity: 0;
-      transition: opacity 0.2s;
+      top: 10px;
+      right: 10px;
+      border: 1px solid rgba(59,130,246,0.35);
+      background: rgba(59,130,246,0.15);
+      color: #dbeafe;
+      padding: 6px 10px;
+      border-radius: 8px;
+      font-size: 11px;
+      cursor: pointer;
     }
 
-    .data-tile:hover {
-      border-color: var(--accent-blue);
-      transform: translateY(-2px);
-      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    .code-block pre {
+      margin: 0;
+      padding: 18px 18px 16px;
+      overflow-x: auto;
+      font-family: var(--mono);
+      font-size: 12px;
+      line-height: 1.6;
+      color: #cbd9ff;
     }
 
-    .data-tile:hover::before {
-      opacity: 1;
-    }
+    .code-block .kw { color: #93c5fd; }
+    .code-block .const { color: #f9a8d4; }
+    .code-block .str { color: #bef264; }
+    .code-block .cmd { color: #facc15; }
+    .code-block .flag { color: #fca5a5; }
+    .code-block .comment { color: #94a3b8; }
 
-    .tile-header {
+    .actions-list {
       display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
-      margin-bottom: 12px;
+      flex-direction: column;
+      gap: 12px;
     }
 
-    .tile-label {
+    .action-btn {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border: 1px solid rgba(59,130,246,0.25);
+      background: rgba(18,28,45,0.9);
+      padding: 12px 14px;
+      border-radius: 12px;
+      font-size: 13px;
+      cursor: pointer;
+      transition: background 0.15s ease, transform 0.15s ease;
+    }
+
+    .action-btn:hover {
+      background:rgba(27,39,59,0.95);
+      transform: translateY(-1px);
+    }
+
+    .action-btn.danger {
+      border-color: rgba(239, 68, 68, 0.45);
+      background: rgba(127, 29, 29, 0.25);
+      color: #fca5a5;
+    }
+
+    .metrics-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px 18px;
+      font-family: var(--mono);
+      font-size: 13px;
+    }
+
+    .metrics-grid div span {
+      display: block;
       font-size: 11px;
       color: var(--text-muted);
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      font-weight: 600;
+      letter-spacing: 0.03em;
+      margin-bottom: 4px;
     }
 
-    .tile-source {
-      font-size: 10px;
-      color: var(--text-muted);
-      background: var(--bg-tertiary);
-      padding: 3px 8px;
-      border-radius: 4px;
-      font-family: 'JetBrains Mono', monospace;
+    .sparkline-container {
+      height: 50px;
+      background: rgba(59, 130, 246, 0.08);
+      border: 1px solid rgba(59,130,246,0.15);
+      border-radius: 12px;
+      padding: 4px 6px;
     }
 
-    .tile-value {
-      font-size: 32px;
-      font-weight: 700;
-      font-family: 'JetBrains Mono', monospace;
-      color: var(--text-primary);
-      line-height: 1.2;
-    }
-
-    .tile-value.waiting {
-      font-size: 14px;
-      color: var(--text-muted);
-      font-style: italic;
-      font-family: 'Inter', sans-serif;
-    }
-
-    .tile-change {
-      font-size: 12px;
-      margin-top: 8px;
-      font-family: 'JetBrains Mono', monospace;
-    }
-
-    .tile-change.positive { color: var(--accent-green); }
-    .tile-change.negative { color: var(--accent-red); }
-
-    /* Console Output */
-    .console {
-      background: var(--bg-secondary);
-      border: 1px solid var(--border-color);
-      border-radius: 8px;
-      padding: 16px;
-      margin-bottom: 24px;
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 12px;
-      max-height: 200px;
-      overflow-y: auto;
-      display: none;
-      color: var(--accent-green);
-    }
-
-    .console.active {
+    .sparkline-container canvas {
+      width: 100%;
+      height: 100%;
       display: block;
     }
 
-    .console::-webkit-scrollbar {
-      width: 6px;
-    }
-
-    .console::-webkit-scrollbar-track {
-      background: var(--bg-tertiary);
-    }
-
-    .console::-webkit-scrollbar-thumb {
-      background: var(--border-color);
-      border-radius: 3px;
-    }
-
-    /* Empty State */
-    .empty-state {
-      text-align: center;
-      padding: 80px 40px;
-      color: var(--text-muted);
-    }
-
-    .empty-state-icon {
-      font-size: 64px;
-      margin-bottom: 16px;
-      opacity: 0.3;
-    }
-
-    .empty-state-title {
-      font-size: 18px;
-      font-weight: 600;
-      color: var(--text-secondary);
-      margin-bottom: 8px;
-    }
-
-    .empty-state-text {
-      font-size: 14px;
-      line-height: 1.6;
-    }
-
-    /* Utility */
-    .hidden { display: none; }
-
-    .hint-text {
-      font-size: 12px;
-      color: var(--text-muted);
-      margin-top: 8px;
-      line-height: 1.5;
-    }
-
-    /* Input hints */
-    .input-hint {
-      font-size: 11px;
-      color: var(--text-muted);
-      margin-top: 6px;
-      display: flex;
-      align-items: center;
-      gap: 6px;
-    }
-
-    /* Responsive */
-    @media (max-width: 1024px) {
-      .main-container {
-        grid-template-columns: 1fr;
-      }
-      .config-panel {
-        border-right: none;
-        border-bottom: 1px solid var(--border-color);
-        height: auto;
-        max-height: 60vh;
-      }
-      .perf-grid {
-        grid-template-columns: repeat(2, 1fr);
-      }
+    .column-merge {
+      grid-column: 1 / -1;
     }
   </style>
 </head>
 <body>
-  <!-- Header -->
-  <div class="header">
-    <div class="logo">
-      <span>⚡</span>
-      <span>BOND TERMINAL</span>
-    </div>
-    <div class="header-stats">
-      <div class="stat-item">
-        <div class="stat-label">Active Streams</div>
-        <div class="stat-value" id="headerStreamCount">0</div>
-      </div>
-      <div class="stat-item">
-        <div class="stat-label">Status</div>
-        <div class="stat-value" id="headerStatus">Ready</div>
-      </div>
-      <div class="stat-item">
-        <div class="stat-label">Latency</div>
-        <div class="stat-value" id="headerLatency">--ms</div>
+  <header>
+    <div class="brand">
+      <div>
+        <h1>Bond Stream Console</h1>
+        <span style="font-size:13px;color:var(--text-muted);">Developer-first live data governance</span>
       </div>
     </div>
-  </div>
+    <nav>
+      <button class="primary" id="toolbarNew">New Stream</button>
+      <button id="toolbarPause">Pause All</button>
+      <button id="toolbarExport">Export Data</button>
+      <a href="https://docs.example.com" target="_blank" rel="noreferrer">Docs</a>
+      <button id="toolbarSettings">Settings</button>
+    </nav>
+  </header>
 
-  <!-- Main Container -->
-  <div class="main-container">
-    <!-- Left Panel: Configuration -->
-    <div class="config-panel">
-      <!-- Natural Language Input -->
-      <div class="panel-section">
-        <div class="section-header">
-          <div class="section-number">💬</div>
-          <span>Natural Language Query</span>
-        </div>
-        <textarea
-          id="nlQuery"
-          placeholder="Example: show me live bitcoin prices from kraken with volume"
-          style="width: 100%; min-height: 80px; resize: vertical; font-family: 'Inter', sans-serif; background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary); padding: 12px; border-radius: 6px; font-size: 14px; line-height: 1.5;"
-        ></textarea>
-        <div class="hint-text">
-          💡 Try: "btc prices right now" | "eth from all exchanges" | "solana with twitter sentiment"
-        </div>
-        <button type="button" class="btn btn-success" onclick="submitNaturalLanguage()" style="margin-top: 12px;">
-          🤖 Parse & Launch Stream
-        </button>
-        <div style="text-align: center; margin: 16px 0; color: var(--text-muted); font-size: 12px; font-weight: 600;">
-          — OR —
-        </div>
+  <main>
+    <aside class="left-pane">
+      <div class="session-list">
+        <h2>Sessions</h2>
+        <button id="sessionNewBtn" style="border:none;background:rgba(59,130,246,0.16);padding:6px 10px;border-radius:8px;color:var(--accent);font-size:12px;cursor:pointer;">New</button>
       </div>
-
-      <form id="streamForm">
-        <!-- Symbol Selection -->
-        <div class="panel-section">
-          <div class="section-header">
-            <div class="section-number">1</div>
-            <span>Market Symbol</span>
-          </div>
-          <select id="symbol" required>
-            <option value="BTC">Bitcoin (BTC)</option>
-            <option value="ETH">Ethereum (ETH)</option>
-            <option value="SOL">Solana (SOL)</option>
-            <option value="AVAX">Avalanche (AVAX)</option>
-            <option value="MATIC">Polygon (MATIC)</option>
-            <option value="LINK">Chainlink (LINK)</option>
-            <option value="UNI">Uniswap (UNI)</option>
-            <option value="DOGE">Dogecoin (DOGE)</option>
-            <option value="ADA">Cardano (ADA)</option>
-            <option value="DOT">Polkadot (DOT)</option>
-          </select>
-        </div>
-
-        <!-- Exchange Selection -->
-        <div class="panel-section">
-          <div class="section-header">
-            <div class="section-number">2</div>
-            <span>Exchange Sources</span>
-          </div>
-          <div class="exchange-buttons">
-            <button type="button" class="btn btn-secondary" onclick="addExchange('kraken')">+ Kraken</button>
-            <button type="button" class="btn btn-secondary" onclick="addExchange('kucoin')">+ KuCoin</button>
-          </div>
-          <div id="exchangesContainer"></div>
-        </div>
-
-        <!-- Additional Data Sources -->
-        <div class="panel-section">
-          <div class="section-header">
-            <div class="section-number">3</div>
-            <span>Additional Sources</span>
-          </div>
-          <div class="fields-grid">
-            <div class="field-item" onclick="toggleCheckbox('source_twitter')">
-              <input type="checkbox" id="source_twitter">
-              <label>Twitter/X</label>
-            </div>
-            <div class="field-item" onclick="toggleCheckbox('source_onchain')">
-              <input type="checkbox" id="source_onchain">
-              <label>On-Chain</label>
-            </div>
-            <div class="field-item" onclick="toggleCheckbox('source_liq')">
-              <input type="checkbox" id="source_liq">
-              <label>Liquidations</label>
-            </div>
-            <div class="field-item" onclick="toggleCheckbox('source_google_trends')">
-              <input type="checkbox" id="source_google_trends">
-              <label>Search Trends</label>
-            </div>
-          </div>
-        </div>
-
-        <!-- Google Trends Config -->
-        <div class="panel-section hidden" id="googleTrendsConfig">
-          <div class="section-header">
-            <span>🔍 Search Trends Configuration</span>
-          </div>
-          <div style="margin-bottom: 16px;">
-            <label for="trends_keywords" style="display: block; margin-bottom: 8px; color: var(--text-secondary); font-size: 12px; font-weight: 500;">
-              Keywords (comma-separated, max 5)
-            </label>
-            <input
-              type="text"
-              id="trends_keywords"
-              placeholder="bitcoin, ethereum, crypto"
-            >
-            <div class="input-hint">💡 Leave blank to use selected symbol</div>
-          </div>
-          <div>
-            <label for="trends_timeframe" style="display: block; margin-bottom: 8px; color: var(--text-secondary); font-size: 12px; font-weight: 500;">
-              Timeframe
-            </label>
-            <select id="trends_timeframe">
-              <option value="now 1-H">Last Hour</option>
-              <option value="now 4-H">Last 4 Hours</option>
-              <option value="now 1-d" selected>Last 24 Hours</option>
-              <option value="now 7-d">Last 7 Days</option>
-              <option value="today 1-m">Last 30 Days</option>
-            </select>
-          </div>
-        </div>
-
-        <!-- Update Interval -->
-        <div class="panel-section">
-          <div class="section-header">
-            <div class="section-number">4</div>
-            <span>Update Interval</span>
-          </div>
-          <label for="interval" style="display: block; margin-bottom: 8px; color: var(--text-secondary); font-size: 12px; font-weight: 500;">
-            Seconds between updates
-          </label>
-          <input
-            type="number"
-            id="interval"
-            min="0.1"
-            step="0.1"
-            value="1"
-            required
-            placeholder="1.0"
-          >
-          <div class="input-hint">⚡ 0.1-0.5s = real-time | 1-3s = balanced | 5s+ = low frequency</div>
-        </div>
-
-        <button type="submit" class="btn btn-success">⚡ Initialize Stream</button>
+      <div class="sessions" id="sessionList"></div>
+      <div class="chat-log" id="chatLog"></div>
+      <form class="chat-input" id="chatForm">
+        <textarea id="messageInput" placeholder="Ask Bond Agent to create or modify streams…" rows="4"></textarea>
+        <button type="submit">Submit</button>
       </form>
-    </div>
+    </aside>
 
-    <!-- Right Panel: Data Display -->
-    <div class="data-panel">
-      <div class="console" id="console"></div>
-
-      <div class="perf-stats" id="perfStats">
-        <div class="perf-grid">
-          <div class="perf-item">
-            <div class="perf-label">Update Speed</div>
-            <div class="perf-value green" id="updateSpeed">--</div>
-          </div>
-          <div class="perf-item">
-            <div class="perf-label">Total Updates</div>
-            <div class="perf-value blue" id="updateCount">0</div>
-          </div>
-          <div class="perf-item">
-            <div class="perf-label">Configured Interval</div>
-            <div class="perf-value gray" id="configInterval">--s</div>
-          </div>
-          <div class="perf-item">
-            <div class="perf-label">Stream Status</div>
-            <div class="perf-value" id="updateStatus" style="font-size: 16px;">Standby</div>
+    <section class="detail-pane" id="detailPane">
+      <div class="detail-header" id="streamHeader">
+        <div class="summary">
+          <h2>Select a stream to view details</h2>
+          <div style="display:flex;gap:18px;font-size:13px;color:var(--text-muted);">
+            <span>No stream loaded</span>
           </div>
         </div>
+        <span class="status-pill" id="streamStatus" style="display:none;">• LIVE</span>
       </div>
-
-      <div class="data-grid" id="dataGrid"></div>
-
-      <div class="empty-state" id="emptyState">
-        <div class="empty-state-icon">📊</div>
-        <div class="empty-state-title">No Active Stream</div>
-        <div class="empty-state-text">
-          Configure your data sources in the left panel and initialize a stream to begin receiving real-time market intelligence.
+      <div class="detail-body" id="detailBody">
+        <div class="panel column-merge" style="text-align:center;opacity:0.6;">
+          <h3 style="margin-bottom:10px;">Awaiting Selection</h3>
+          <p style="font-size:13px;color:var(--text-muted);">
+            Use Bond Agent to launch a stream or select one from the Sessions list to inspect its metadata, schema, integrations, and performance metrics.
+          </p>
         </div>
       </div>
-    </div>
-  </div>
+    </section>
+  </main>
 
   <script>
-    let ws = null;
-    const exchanges = new Map();
-    const currentConfig = [];
-    const availableFields = [
-      { id: 'price', label: 'Last Price' },
-      { id: 'bid', label: 'Bid' },
-      { id: 'ask', label: 'Ask' },
-      { id: 'high', label: '24h High' },
-      { id: 'low', label: '24h Low' },
-      { id: 'open', label: 'Open' },
-      { id: 'close', label: 'Close' },
-      { id: 'volume', label: 'Volume' }
-    ];
+    const chatLog = document.getElementById('chatLog');
+    const chatForm = document.getElementById('chatForm');
+    const messageInput = document.getElementById('messageInput');
+    const sessionList = document.getElementById('sessionList');
+    const detailHeader = document.getElementById('streamHeader');
+    const headerSummary = detailHeader.querySelector('.summary');
+    const detailBody = document.getElementById('detailBody');
+    const streamStatus = document.getElementById('streamStatus');
 
-    function sanitizeIdPart(value) {
-      return (value || 'default').replace(/[^a-zA-Z0-9]/g, '_');
+    const activeStreams = new Map();
+    let currentStreamId = null;
+    let pauseAll = false;
+
+    function escapeHtml(str = '') {
+      return str.replace(/[&<>"]+/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
     }
 
-    function toggleCheckbox(id) {
-      const cb = document.getElementById(id);
-      cb.checked = !cb.checked;
-
-      if (id === 'source_google_trends') {
-        const config = document.getElementById('googleTrendsConfig');
-        if (cb.checked) {
-          config.classList.remove('hidden');
-        } else {
-          config.classList.add('hidden');
-        }
-      }
-    }
-
-    function addExchange(exchangeName) {
-      if (exchanges.has(exchangeName)) {
-        alert(`${exchangeName} already added`);
-        return;
-      }
-
-      const container = document.getElementById('exchangesContainer');
-      const exchangeCard = document.createElement('div');
-      exchangeCard.className = 'exchange-card';
-      exchangeCard.id = `exchange_${exchangeName}`;
-
-      let fieldsHTML = availableFields.map(field => `
-        <div class="field-item" onclick="toggleCheckbox('${exchangeName}_${field.id}')">
-          <input type="checkbox" id="${exchangeName}_${field.id}" data-exchange="${exchangeName}" data-field="${field.id}">
-          <label for="${exchangeName}_${field.id}">${field.label}</label>
-        </div>
-      `).join('');
-
-      exchangeCard.innerHTML = `
-        <div class="exchange-header">
-          <div class="exchange-name">${exchangeName}</div>
-          <button type="button" class="btn btn-danger" onclick="removeExchange('${exchangeName}')">Remove</button>
-        </div>
-        <div class="fields-grid">
-          ${fieldsHTML}
-        </div>
+    function appendMessage(role, html) {
+      const wrapper = document.createElement('div');
+      wrapper.className = 'chat-msg ' + role;
+      wrapper.innerHTML = `
+        <div class="avatar">${role === 'agent' ? 'AI' : 'ME'}</div>
+        <div class="bubble">${html}</div>
       `;
-
-      container.appendChild(exchangeCard);
-      exchanges.set(exchangeName, new Set());
+      chatLog.appendChild(wrapper);
+      chatLog.scrollTop = chatLog.scrollHeight;
+      return wrapper.querySelector('.bubble');
     }
 
-    function removeExchange(exchangeName) {
-      const exchangeCard = document.getElementById(`exchange_${exchangeName}`);
-      if (exchangeCard) {
-        exchangeCard.remove();
-        exchanges.delete(exchangeName);
-      }
-    }
+    chatForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const prompt = messageInput.value.trim();
+      if (!prompt) return;
 
-    document.getElementById('streamForm').addEventListener('submit', async (e) => {
-      e.preventDefault();
+      appendMessage('user', escapeHtml(prompt));
+      messageInput.value = '';
 
-      const symbol = document.getElementById('symbol').value;
-      const interval = document.getElementById('interval').value;
-
-      const exchangeConfigs = [];
-      exchanges.forEach((fields, exchangeName) => {
-        const selectedFields = [];
-        availableFields.forEach(field => {
-          const checkbox = document.getElementById(`${exchangeName}_${field.id}`);
-          if (checkbox && checkbox.checked) {
-            selectedFields.push(field.id);
-          }
-        });
-
-        if (selectedFields.length > 0) {
-          exchangeConfigs.push({
-            exchange: exchangeName,
-            fields: selectedFields,
-            symbols: [`${symbol.toUpperCase()}/USDT`]
-          });
-        }
-      });
-
-      if (exchangeConfigs.length === 0) {
-        alert('Please add at least one exchange and select fields');
-        return;
-      }
-
-      currentConfig.length = 0;
-      currentConfig.push(...exchangeConfigs);
-
-      const spec = {
-        sources: exchangeConfigs.map(config => ({
-          type: 'ccxt',
-          exchange: config.exchange,
-          fields: config.fields,
-          symbols: [`${symbol}/USDT`]
-        })),
-        interval_sec: parseFloat(interval),
-        symbols: [`${symbol}/USDT`]
-      };
-
-      if (document.getElementById('source_twitter').checked) {
-        spec.sources.push({ type: 'twitter', symbols: [`${symbol}/USDT`] });
-      }
-      if (document.getElementById('source_onchain').checked) {
-        spec.sources.push({ type: 'onchain', chain: 'sol', event_types: ['tx', 'transfer'] });
-      }
-      if (document.getElementById('source_liq').checked) {
-        spec.sources.push({ type: 'custom', mode: 'mock_liq' });
-      }
-      if (document.getElementById('source_google_trends').checked) {
-        const keywordsInput = document.getElementById('trends_keywords').value;
-        const timeframe = document.getElementById('trends_timeframe').value;
-        const keywords = keywordsInput.trim()
-          ? keywordsInput.split(',').map(k => k.trim().toLowerCase())
-          : [symbol.toLowerCase()];
-
-        spec.sources.push({
-          type: 'google_trends',
-          keywords: keywords,
-          timeframe: timeframe
-        });
-      }
-
-      const console_elem = document.getElementById('console');
-      console_elem.classList.add('active');
-      console_elem.innerHTML = '> Initializing stream...\n';
-
-      document.getElementById('emptyState').style.display = 'none';
-      document.getElementById('headerStatus').textContent = 'Connecting';
-
+      const pending = appendMessage('agent', `Parsing “${escapeHtml(prompt)}”…`);
       try {
-        const response = await fetch('/v1/streams', {
+        const response = await fetch('/v1/streams/parse', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ spec })
+          body: JSON.stringify({ query: prompt }),
         });
-
-        const data = await response.json();
-
-        if (!response.ok || !data.stream_id) {
-          console_elem.innerHTML += `> ERROR: ${data.detail || JSON.stringify(data)}\n`;
-          document.getElementById('headerStatus').textContent = 'Error';
-          return;
-        }
-
-        console_elem.innerHTML += `> Stream ID: ${data.stream_id}\n`;
-        console_elem.innerHTML += `> Establishing WebSocket connection...\n`;
-
-        document.getElementById('headerStreamCount').textContent = '1';
-
-        initializeDisplay(exchangeConfigs);
-
-        if (ws) ws.close();
-
-        const wsUrl = data.ws_url.replace('localhost', window.location.hostname);
-        ws = new WebSocket(wsUrl);
-
-        let lastUpdateTime = null;
-        let updateCount = 0;
-
-        ws.onopen = () => {
-          console_elem.innerHTML += '> Connected - Streaming live data\n';
-          document.getElementById('perfStats').classList.add('active');
-          document.getElementById('dataGrid').classList.add('active');
-          document.getElementById('configInterval').textContent = interval + 's';
-          document.getElementById('updateStatus').textContent = '🟢 Active';
-          document.getElementById('updateStatus').style.color = 'var(--accent-green)';
-          document.getElementById('headerStatus').textContent = 'Active';
-          document.getElementById('headerStatus').style.color = 'var(--accent-green)';
-          lastUpdateTime = Date.now();
-        };
-
-        ws.onmessage = (event) => {
-          const streamEvent = JSON.parse(event.data);
-
-          const now = Date.now();
-          const timeSinceLastUpdate = lastUpdateTime ? (now - lastUpdateTime) / 1000 : 0;
-          lastUpdateTime = now;
-          updateCount++;
-
-          document.getElementById('updateSpeed').textContent = timeSinceLastUpdate.toFixed(3) + 's';
-          document.getElementById('updateCount').textContent = updateCount;
-          document.getElementById('headerLatency').textContent = (timeSinceLastUpdate * 1000).toFixed(0) + 'ms';
-
-          const speedEl = document.getElementById('updateSpeed');
-          if (timeSinceLastUpdate < 0.5) {
-            speedEl.className = 'perf-value green';
-          } else if (timeSinceLastUpdate < 2) {
-            speedEl.className = 'perf-value blue';
-          } else {
-            speedEl.className = 'perf-value gray';
-          }
-
-          updateDataDisplay(streamEvent);
-        };
-
-        ws.onerror = () => {
-          console_elem.innerHTML += '> WebSocket error\n';
-          document.getElementById('headerStatus').textContent = 'Error';
-          document.getElementById('headerStatus').style.color = 'var(--accent-red)';
-        };
-
-        ws.onclose = () => {
-          console_elem.innerHTML += '> Connection closed\n';
-          document.getElementById('headerStatus').textContent = 'Disconnected';
-          document.getElementById('headerStatus').style.color = 'var(--text-muted)';
-        };
-
-      } catch (error) {
-        console_elem.innerHTML += `> EXCEPTION: ${error.message}\n`;
-        document.getElementById('headerStatus').textContent = 'Error';
+        if (!response.ok) throw new Error(await response.text());
+        const parsed = await response.json();
+        renderParseSummary(parsed, pending);
+      } catch (err) {
+        pending.innerHTML = `
+          <div>Error parsing request.</div>
+          <div style="margin-top:8px;color:#fca5a5;font-size:13px;">${escapeHtml(err.message)}</div>
+        `;
       }
     });
 
-    function initializeDisplay(exchangeConfigs) {
-      const dataGrid = document.getElementById('dataGrid');
-      let html = '';
+    function renderParseSummary(parsed, bubble) {
+      const rows = parsed.spec.sources.filter(src => src.type === 'ccxt').map(src => `
+        <tr>
+          <td>${escapeHtml((src.exchange || 'BINANCEUS').toUpperCase())}</td>
+          <td>${escapeHtml((src.symbols || []).join(', '))}</td>
+          <td>${escapeHtml((src.fields || []).join(', ') || 'price, volume')}</td>
+        </tr>
+      `).join('');
 
-      exchangeConfigs.forEach(config => {
-        const symbols = (config.symbols && config.symbols.length > 0) ? config.symbols : [null];
-        symbols.forEach(symbol => {
-          config.fields.forEach(field => {
-            const fieldLabel = availableFields.find(f => f.id === field)?.label || field;
-            const symbolLabel = symbol ? symbol.toUpperCase() : '';
-            const tileId = symbol
-              ? `tile_${config.exchange}_${sanitizeIdPart(symbol)}_${field}`
-              : `tile_${config.exchange}_${field}`;
-            const sourceLabel = symbol
-              ? `${config.exchange.toUpperCase()} · ${symbolLabel}`
-              : config.exchange.toUpperCase();
-            html += `
-              <div class="data-tile" id="${tileId}">
-                <div class="tile-header">
-                  <div class="tile-label">${fieldLabel}</div>
-                  <div class="tile-source">${sourceLabel}</div>
-                </div>
-                <div class="tile-value waiting">Waiting for data...</div>
-              </div>
-            `;
+      bubble.innerHTML = `
+        <div>Here’s the stream I can create:</div>
+        <table style="margin-top:12px;border-collapse:collapse;width:100%;font-size:12px;">
+          <thead>
+            <tr style="background:rgba(59,130,246,0.18);">
+              <th style="padding:6px 8px;text-align:left;border:1px solid rgba(59,130,246,0.15);">Exchange</th>
+              <th style="padding:6px 8px;text-align:left;border:1px solid rgba(59,130,246,0.15);">Symbols</th>
+              <th style="padding:6px 8px;text-align:left;border:1px solid rgba(59,130,246,0.15);">Fields</th>
+            </tr>
+          </thead>
+          <tbody>${rows || '<tr><td colspan="3" style="padding:8px;color:#f87171;">No CCXT source detected.</td></tr>'}</tbody>
+        </table>
+        <div style="margin-top:12px;display:flex;gap:10px;">
+          <button id="confirmLaunchBtn" style="border:1px solid rgba(59,130,246,0.35);background:rgba(59,130,246,0.15);color:#dbeafe;padding:8px 12px;border-radius:10px;font-size:12px;cursor:pointer;">Launch</button>
+          <button id="cancelLaunchBtn" style="border:1px solid rgba(148,163,184,0.35);background:rgba(148,163,184,0.12);color:#cbd5f5;padding:8px 12px;border-radius:10px;font-size:12px;cursor:pointer;">Modify</button>
+        </div>
+      `;
+
+      bubble.querySelector('#confirmLaunchBtn').addEventListener('click', async () => {
+        bubble.innerHTML = 'Launching stream…';
+        try {
+          const response = await fetch('/v1/streams', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ spec: parsed.spec }),
           });
-        });
+          if (!response.ok) throw new Error(await response.text());
+          const stream = await response.json();
+          bubble.innerHTML = `Stream <code>${escapeHtml(stream.stream_id)}</code> started.`;
+          addSession(stream.stream_id, stream.ws_url, parsed.spec);
+          loadStream(stream.stream_id);
+        } catch (err) {
+          bubble.innerHTML = `Failed to launch: ${escapeHtml(err.message)}`;
+        }
       });
 
-      if (document.getElementById('source_twitter').checked) {
-        html += `
-          <div class="data-tile" id="tile_tweets">
-            <div class="tile-header">
-              <div class="tile-label">Tweet Count</div>
-              <div class="tile-source">TWITTER</div>
-            </div>
-            <div class="tile-value waiting">0</div>
-          </div>
-        `;
-      }
-
-      if (document.getElementById('source_onchain').checked) {
-        html += `
-          <div class="data-tile" id="tile_onchain">
-            <div class="tile-header">
-              <div class="tile-label">On-Chain Events</div>
-              <div class="tile-source">BLOCKCHAIN</div>
-            </div>
-            <div class="tile-value waiting">0</div>
-          </div>
-        `;
-      }
-
-      if (document.getElementById('source_google_trends').checked) {
-        const keywordsInput = document.getElementById('trends_keywords').value;
-        const keywords = keywordsInput.trim()
-          ? keywordsInput.split(',').map(k => k.trim())
-          : [document.getElementById('symbol').value.toLowerCase()];
-
-        keywords.forEach(keyword => {
-          html += `
-            <div class="data-tile" id="tile_trends_${keyword.replace(/\s+/g, '_')}">
-              <div class="tile-header">
-                <div class="tile-label">${keyword.toUpperCase()} Search Interest</div>
-                <div class="tile-source">GOOGLE</div>
-              </div>
-              <div class="tile-value waiting">--/100</div>
-            </div>
-          `;
-        });
-      }
-
-      dataGrid.innerHTML = html;
+      bubble.querySelector('#cancelLaunchBtn').addEventListener('click', () => {
+        bubble.innerHTML = 'Okay — adjust your request and send again.';
+      });
     }
 
-    async function submitNaturalLanguage() {
-      const query = document.getElementById('nlQuery').value.trim();
-      if (!query) {
-        alert('Please enter a query');
-        return;
+    function addSession(streamId, wsUrl, spec) {
+      activeStreams.set(streamId, {
+        streamId,
+        wsUrl,
+        spec,
+        metrics: null,
+        schema: null,
+        derivedSchema: null,
+        status: 'LIVE',
+        priceHistory: [],
+        latencyHistory: [],
+        lastEvent: null,
+        socket: null,
+        createdAt: spec?.created_at ? new Date(spec.created_at).getTime() : Date.now(),
+      });
+      renderSessions();
+      const entry = activeStreams.get(streamId);
+      if (entry) {
+        openStreamSocket(entry);
+      }
+      pollStreamData(streamId);
+    }
+
+    function openStreamSocket(entry) {
+      try {
+        entry.status = 'CONNECTING';
+        renderSessions();
+        const url = entry.wsUrl.replace('localhost', window.location.hostname);
+        const socket = new WebSocket(url);
+        entry.socket = socket;
+
+        socket.onopen = () => {
+          entry.status = 'LIVE';
+          renderSessions();
+          if (currentStreamId === entry.streamId) renderStreamDetail(entry);
+        };
+
+        socket.onmessage = (event) => {
+          try {
+            const payload = JSON.parse(event.data);
+            entry.lastEvent = payload;
+            const tsValue = payload.ts || payload.window_end;
+            if (tsValue) {
+              const ts = new Date(tsValue).getTime();
+              entry.latencyHistory.push(Date.now() - ts);
+              if (entry.latencyHistory.length > 50) entry.latencyHistory.shift();
+            }
+
+            const price = extractRepresentativePrice(payload);
+            if (typeof price === 'number' && !Number.isNaN(price)) {
+              entry.priceHistory.push(price);
+              if (entry.priceHistory.length > 120) entry.priceHistory.shift();
+            }
+
+            // Store tweet data if present
+            const tweetData = payload.raw_data?.tweet_data;
+            if (tweetData && tweetData.text) {
+              entry.latestTweet = tweetData;
+            }
+
+            if (!entry.schema) {
+              entry.derivedSchema = deriveSchemaFromEvent(payload);
+            }
+            if (currentStreamId === entry.streamId) renderStreamDetail(entry);
+            renderSessions();
+          } catch (err) {
+            console.warn('Malformed event', err);
+          }
+        };
+
+        socket.onerror = () => {
+          entry.status = 'ERROR';
+          renderSessions();
+        };
+
+        socket.onclose = () => {
+          entry.socket = null;
+          if (entry.status === 'LIVE') {
+            entry.status = 'DISCONNECTED';
+          }
+          renderSessions();
+        };
+      } catch (err) {
+        console.warn('WebSocket failure', err);
+        entry.status = 'ERROR';
+        renderSessions();
+      }
+    }
+
+    function renderSessions() {
+      const fragments = [];
+      for (const [streamId, stream] of activeStreams.entries()) {
+        fragments.push(`
+          <div class="session-item ${streamId === currentStreamId ? 'active' : ''}" data-stream="${streamId}">
+            <div style="display:flex;justify-content:space-between;align-items:center;">
+              <strong style="font-size:13px;">${escapeHtml((stream.spec.symbols || []).join(', ') || streamId.slice(0, 8))}</strong>
+              <span>${stream.status}</span>
+            </div>
+            <span>ID: ${escapeHtml(streamId)}</span>
+            <span>Interval: ${(stream.spec.interval_sec || 1)}s</span>
+          </div>
+        `);
+      }
+      sessionList.innerHTML = fragments.join('') || '<div style="color:var(--text-muted);font-size:12px;">No streams launched yet.</div>';
+      sessionList.querySelectorAll('[data-stream]').forEach(node => node.addEventListener('click', () => loadStream(node.dataset.stream)));
+    }
+
+    async function pollStreamData(streamId) {
+      try {
+        const [schemaRes, metricsRes] = await Promise.all([
+          fetch(`/v1/streams/${streamId}/schema`),
+          fetch(`/v1/streams/${streamId}/metrics`)
+        ]);
+        if (!schemaRes.ok) throw new Error(await schemaRes.text());
+        if (!metricsRes.ok) throw new Error(await metricsRes.text());
+        const schema = await schemaRes.json();
+        const metrics = await metricsRes.json();
+        const entry = activeStreams.get(streamId);
+        if (entry) {
+          if (schema && Object.keys(schema).length) {
+            entry.schema = schema;
+          }
+          entry.metrics = metrics;
+          entry.status = metrics.status || 'LIVE';
+          if (metrics.created_at && !Number.isNaN(Date.parse(metrics.created_at))) {
+            entry.createdAt = new Date(metrics.created_at).getTime();
+          }
+          if (metrics.latency_ms != null) {
+            entry.latencyHistory.push(metrics.latency_ms);
+            if (entry.latencyHistory.length > 20) entry.latencyHistory.shift();
+          }
+          if (currentStreamId === streamId) renderStreamDetail(entry);
+        }
+      } catch (err) {
+        console.warn('Metrics fetch failed', err);
+      } finally {
+        setTimeout(() => pollStreamData(streamId), 10000);
+      }
+    }
+
+    function loadStream(streamId) {
+      const entry = activeStreams.get(streamId);
+      if (!entry) return;
+      currentStreamId = streamId;
+      renderSessions();
+      renderStreamDetail(entry);
+    }
+
+    function renderStreamDetail(stream) {
+      const interval = stream.spec.interval_sec || 1;
+      const createdSource = stream.metrics?.created_at || stream.spec.created_at;
+      const created = createdSource ? new Date(createdSource) : null;
+      let latencyValue = stream.metrics?.mean_latency_ms;
+      if (latencyValue == null && stream.latencyHistory.length) {
+        const sum = stream.latencyHistory.reduce((acc, val) => acc + val, 0);
+        latencyValue = sum / stream.latencyHistory.length;
+      }
+      const latency = latencyValue != null ? `${latencyValue.toFixed(1)} ms` : '—';
+      const latestPrice = extractRepresentativePrice(stream.lastEvent);
+      const currentTick = stream.metrics?.current_tick || stream.lastEvent?.ts || stream.lastEvent?.window_end || '—';
+      const eventsPerMinute = stream.metrics?.events_last_minute ?? '—';
+      const dropped = stream.metrics?.dropped ?? '—';
+      let uptime = stream.metrics?.uptime;
+      if (!uptime && stream.createdAt) {
+        const diffMs = Date.now() - stream.createdAt;
+        uptime = formatDuration(diffMs);
+      }
+      uptime = uptime || '—';
+      const subscribers = stream.metrics?.subscribers ?? '—';
+
+      if (headerSummary) {
+        headerSummary.innerHTML = `
+          <h2>${escapeHtml((stream.spec.symbols || []).join(', ') || stream.streamId)}</h2>
+          <div style="display:flex;gap:18px;font-size:13px;color:var(--text-muted);">
+            <span>Stream ID: ${escapeHtml(stream.streamId)}</span>
+            <span>Interval: ${interval}s</span>
+            <span>Latency: ${latency}</span>
+            <span>Created: ${created ? created.toISOString() : '—'}</span>
+          </div>
+        `;
       }
 
-      const console_elem = document.getElementById('console');
-      console_elem.classList.add('active');
-      console_elem.innerHTML = `> Parsing query: "${query}"\n`;
-      document.getElementById('emptyState').style.display = 'none';
-      document.getElementById('headerStatus').textContent = 'Parsing';
+      streamStatus.style.display = 'inline-flex';
+      streamStatus.textContent = stream.status;
+      streamStatus.className = 'status-pill ' + (stream.status.toUpperCase().includes('STOP') ? 'error' : stream.status.toUpperCase().includes('PAUSE') ? 'warn' : '');
 
-      try {
-        // Parse natural language to spec
-        const parseResponse = await fetch('/v1/streams/parse', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ query })
-        });
+      const schemaToRender = getDisplaySchema(stream);
 
-        const parseData = await parseResponse.json();
+      detailBody.innerHTML = `
+        <div class="panel">
+          <h3>Stream Metadata</h3>
+          <dl>
+            <dt>Stream ID</dt><dd>${escapeHtml(stream.streamId)}</dd>
+            <dt>Status</dt><dd>${escapeHtml(stream.status)}</dd>
+            <dt>Interval</dt><dd>${interval}s</dd>
+            <dt>Latency</dt><dd>${latency}</dd>
+            <dt>Created</dt><dd>${created ? created.toISOString() : '—'}</dd>
+            <dt>Symbols</dt><dd>${escapeHtml((stream.spec.symbols || []).join(', '))}</dd>
+            <dt>Sources</dt><dd>${escapeHtml((stream.spec.sources || []).map(s => s.type).join(', '))}</dd>
+            <dt>Exchanges</dt><dd>${escapeHtml((stream.spec.sources || []).flatMap(s => s.exchange ? [s.exchange.toUpperCase()] : []).join(', ') || 'BINANCEUS')}</dd>
+            <dt>Driver Stream</dt><dd>CCXT</dd>
+            <dt>Type</dt><dd>AggregatedEvent</dd>
+            <dt>Last price</dt><dd>${latestPrice != null ? '$' + latestPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'}</dd>
+          </dl>
+        </div>
+        <div class="panel">
+          <h3>Data Schema</h3>
+          <div style="max-height:220px;overflow:auto;font-family:var(--mono);font-size:12px;border:1px solid rgba(59,130,246,0.15);border-radius:10px;padding:10px;background:rgba(8,13,23,0.95);">
+            ${Object.entries(schemaToRender || {}).map(([field, meta]) => {
+              if (typeof meta === 'string') {
+                return `<div>${escapeHtml(field)}: ${escapeHtml(meta)}</div>`;
+              }
+              const descriptor = meta?.type ? escapeHtml(meta.type) : 'unknown';
+              const suffix = meta?.optional ? ' (optional)' : '';
+              return `<div>${escapeHtml(field)}: ${descriptor}${suffix}</div>`;
+            }).join('') || 'Schema unavailable'}
+          </div>
+          <div style="display:flex;gap:10px;">
+            <button class="action-btn" onclick="copySchema('${stream.streamId}', 'json')">Copy Schema JSON</button>
+            <button class="action-btn" onclick="copySchema('${stream.streamId}', 'csv')">Copy CSV Header</button>
+          </div>
+        </div>
+        <div class="panel column-merge">
+          <h3>Integration Snippets</h3>
+          <div class="code-block">
+            <button onclick="copySnippet('python-${stream.streamId}')">Copy</button>
+            <pre><code id="python-${stream.streamId}"></code></pre>
+          </div>
+          <div class="code-block">
+            <button onclick="copySnippet('ws-${stream.streamId}')">Copy</button>
+            <pre><code id="ws-${stream.streamId}"></code></pre>
+          </div>
+          <div class="code-block">
+            <button onclick="copySnippet('curl-${stream.streamId}')">Copy</button>
+            <pre><code id="curl-${stream.streamId}"></code></pre>
+          </div>
+        </div>
+        <div class="panel">
+          <h3>Live Metrics</h3>
+          <div class="metrics-grid">
+            <div><span>Current tick</span>${escapeHtml(String(currentTick))}</div>
+            <div><span>Events (60s)</span>${eventsPerMinute}</div>
+            <div><span>Mean latency</span>${latency}</div>
+            <div><span>Dropped packets</span>${dropped}</div>
+            <div><span>Uptime</span>${uptime}</div>
+            <div><span>Subscribers</span>${subscribers}</div>
+          </div>
+          <div class="sparkline-container" id="latencySpark-${stream.streamId}">
+            <canvas></canvas>
+          </div>
+          <div style="display:flex;gap:10px;">
+            <button class="action-btn" onclick="refreshMetrics('${stream.streamId}')">Refresh</button>
+            <button class="action-btn" onclick="exportData('${stream.streamId}', 'csv')">Export CSV (1h)</button>
+            <button class="action-btn" onclick="exportData('${stream.streamId}', 'parquet')">Export Parquet</button>
+          </div>
+        </div>
+        ${stream.latestTweet ? `
+        <div class="panel column-merge">
+          <h3>Latest Tweet from @${escapeHtml(stream.latestTweet.symbol || 'user').toLowerCase()}</h3>
+          <div style="background:rgba(8,13,23,0.95);border:1px solid rgba(59,130,246,0.15);border-radius:12px;padding:16px;">
+            <div style="font-size:14px;line-height:1.6;color:var(--text);white-space:pre-wrap;word-break:break-word;">
+              ${escapeHtml(stream.latestTweet.text)}
+            </div>
+            ${stream.latestTweet.timestamp_posted ? `
+              <div style="margin-top:12px;font-size:12px;color:var(--text-muted);font-family:var(--mono);">
+                Posted: ${escapeHtml(stream.latestTweet.timestamp_posted)}
+              </div>
+            ` : ''}
+          </div>
+        </div>
+        ` : ''}
+        <div class="panel">
+          <h3>Actions</h3>
+          <div class="actions-list">
+            <div class="action-btn" onclick="restartStream('${stream.streamId}')">Restart Stream</div>
+            <div class="action-btn" onclick="duplicateStream('${stream.streamId}')">Duplicate Spec</div>
+            <div class="action-btn" onclick="downloadSpec('${stream.streamId}')">Download Spec JSON</div>
+            <div class="action-btn danger" onclick="stopStream('${stream.streamId}')">Stop Stream</div>
+          </div>
+        </div>
+      `;
 
-        if (!parseResponse.ok) {
-          console_elem.innerHTML += `> PARSE ERROR: ${parseData.detail || JSON.stringify(parseData)}\n`;
-          document.getElementById('headerStatus').textContent = 'Error';
-          return;
+      const pythonSnippet = `from bond import listen\n\nasync def main():\n    async for event in listen("${stream.streamId}"):\n        print(event)`;
+      const wsActual = stream.wsUrl.replace('localhost', window.location.hostname);
+      const wsDisplay = wsActual.replace(/token=.*$/i, 'token=***');
+      const curlSnippet = `curl -X GET "https://api.bond.dev/v1/streams/${stream.streamId}" \\\n     -H "Authorization: Bearer <token>"`;
+
+      setSnippet(`python-${stream.streamId}`, 'python', pythonSnippet);
+      setSnippet(`ws-${stream.streamId}`, 'url', wsActual, wsDisplay);
+      setSnippet(`curl-${stream.streamId}`, 'shell', curlSnippet);
+
+      requestAnimationFrame(() => renderLatencySparkline(stream));
+    }
+
+    function copySchema(streamId, type) {
+      const entry = activeStreams.get(streamId);
+      if (!entry) return;
+      const schema = getDisplaySchema(entry);
+      if (!schema || !Object.keys(schema).length) return;
+      if (type === 'json') {
+        navigator.clipboard.writeText(JSON.stringify(schema, null, 2));
+      } else {
+        navigator.clipboard.writeText(Object.keys(schema).join(','));
+      }
+    }
+
+    function highlightSnippet(lang, code) {
+      let escaped = code
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+
+      const apply = (regex, cls) => {
+        escaped = escaped.replace(regex, `<span class="${cls}">$1</span>`);
+      };
+
+      if (lang === 'python') {
+        apply(/\b(async|await|for|in|from|import|print|return|def|class|with|as|yield|if|else|elif)\b/g, 'kw');
+        apply(/\b(True|False|None)\b/g, 'const');
+        apply(/(&quot;.*?&quot;)/g, 'str');
+        apply(/(&#39;.*?&#39;)/g, 'str');
+        apply(/(#.*?$)/gm, 'comment');
+      } else if (lang === 'shell') {
+        apply(/^(curl)/gm, 'cmd');
+        apply(/\s(-{1,2}\w+)/g, 'flag');
+        apply(/(https?:\/\/[^\s]+)/g, 'str');
+        apply(/(".*?")/g, 'str');
+      } else if (lang === 'url') {
+        apply(/(wss?:\/\/[^\s]+)/g, 'str');
+        apply(/(token=)([^\s]+)/g, 'flag');
+      }
+
+      escaped = escaped
+        .replace(/\t/g, '&nbsp;&nbsp;&nbsp;&nbsp;')
+        .replace(/  /g, '&nbsp;&nbsp;')
+        .replace(/\n/g, '<br>');
+
+      return escaped;
+    }
+
+    function setSnippet(elementId, lang, code, displayCode = null) {
+      const node = document.getElementById(elementId);
+      if (!node) return;
+      node.dataset.snippet = code;
+      const toRender = displayCode == null ? code : displayCode;
+      node.innerHTML = highlightSnippet(lang, toRender);
+    }
+
+    function copySnippet(elementId) {
+      const node = document.getElementById(elementId);
+      if (!node) return;
+      const text = node.dataset.snippet || node.innerText || '';
+      navigator.clipboard.writeText(text);
+    }
+
+    function extractRepresentativePrice(event) {
+      if (!event) return null;
+      if (typeof event.price_close === 'number') return event.price_close;
+      if (typeof event.price_avg === 'number') return event.price_avg;
+      const exchangeData = event.raw_data?.exchange_data;
+      if (exchangeData) {
+        for (const exchange of Object.keys(exchangeData)) {
+          const symbols = exchangeData[exchange]?.symbols || {};
+          for (const symbol of Object.keys(symbols)) {
+            const price = symbols[symbol]?.price;
+            if (typeof price === 'number') return price;
+          }
         }
+      }
+      return null;
+    }
 
-        console_elem.innerHTML += `> LLM Reasoning: ${parseData.reasoning}\n`;
-        console_elem.innerHTML += `> Creating stream...\n`;
+    function deriveSchemaFromEvent(event) {
+      if (!event || typeof event !== 'object') return null;
+      const result = {};
+      for (const [key, value] of Object.entries(event)) {
+        result[key] = inferType(value);
+      }
+      return result;
+    }
 
-        // Extract exchange configs from parsed data for display initialization
-        const parsedSymbols = (parseData.parsed_config.symbols || []).map(sym => `${sym.toUpperCase()}/USDT`);
-        const exchangeConfigs = (parseData.parsed_config.exchanges || []).map(cfg => ({
-          ...cfg,
-          symbols: parsedSymbols.length ? parsedSymbols : [`${document.getElementById('symbol').value.toUpperCase()}/USDT`]
-        }));
-        currentConfig.length = 0;
-        currentConfig.push(...exchangeConfigs);
+    function inferType(value) {
+      if (value === null || value === undefined) return { type: 'unknown', optional: true };
+      if (typeof value === 'number') {
+        return { type: Number.isInteger(value) ? 'int' : 'float' };
+      }
+      if (typeof value === 'string') return { type: 'string' };
+      if (typeof value === 'boolean') return { type: 'bool' };
+      if (Array.isArray(value)) return { type: 'array' };
+      if (value instanceof Date) return { type: 'datetime' };
+      if (typeof value === 'object') {
+        return { type: 'object', optional: false };
+      }
+      return { type: typeof value };
+    }
 
-        // Create stream with parsed spec
+    function getDisplaySchema(stream) {
+      const base = (stream.schema && Object.keys(stream.schema).length) ? stream.schema : (stream.derivedSchema || {});
+      const entries = Object.entries(base || {});
+      const filtered = {};
+      const eventKeys = stream.lastEvent ? new Set(Object.keys(stream.lastEvent)) : null;
+
+      for (const [field, meta] of entries) {
+        if (eventKeys && !eventKeys.has(field)) continue;
+        filtered[field] = meta;
+      }
+
+      if ((!filtered.symbol) && ((stream.spec?.symbols || []).length > 1 || stream.lastEvent?.symbol)) {
+        filtered.symbol = { type: 'string' };
+      }
+
+      return filtered;
+    }
+
+    function formatDuration(milliseconds) {
+      if (!Number.isFinite(milliseconds) || milliseconds < 0) return null;
+      const totalSeconds = Math.floor(milliseconds / 1000);
+      const hours = Math.floor(totalSeconds / 3600);
+      const minutes = Math.floor((totalSeconds % 3600) / 60);
+      const seconds = totalSeconds % 60;
+      const parts = [];
+      if (hours) parts.push(`${hours}h`);
+      if (minutes) parts.push(`${minutes}m`);
+      if (!parts.length || seconds) parts.push(`${seconds}s`);
+      return parts.join(' ');
+    }
+
+    async function refreshMetrics(streamId) {
+      const entry = activeStreams.get(streamId);
+      if (!entry) return;
+      try {
+        const response = await fetch(`/v1/streams/${streamId}/metrics`);
+        if (!response.ok) throw new Error(await response.text());
+        entry.metrics = await response.json();
+        renderStreamDetail(entry);
+      } catch (err) {
+        appendMessage('agent', `Unable to refresh metrics: ${escapeHtml(err.message)}`);
+      }
+    }
+
+    async function exportData(streamId, format) {
+      try {
+        const response = await fetch(`/v1/streams/${streamId}/export?format=${format}`);
+        if (!response.ok) throw new Error(await response.text());
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `${streamId}.${format}`;
+        link.click();
+        URL.revokeObjectURL(url);
+      } catch (err) {
+        appendMessage('agent', `Export failed: ${escapeHtml(err.message)}`);
+      }
+    }
+
+    async function restartStream(streamId) {
+      const entry = activeStreams.get(streamId);
+      try {
+        await fetch(`/v1/streams/${streamId}/restart`, { method: 'PATCH' });
+        appendMessage('agent', `Stream ${escapeHtml(streamId)} restarted.`);
+        if (entry?.socket) {
+          entry.socket.close();
+          entry.socket = null;
+        }
+        if (entry) {
+          entry.status = 'CONNECTING';
+          openStreamSocket(entry);
+        }
+        refreshMetrics(streamId);
+      } catch (err) {
+        appendMessage('agent', `Restart failed: ${escapeHtml(err.message)}`);
+      }
+    }
+
+    async function duplicateStream(streamId) {
+      const entry = activeStreams.get(streamId);
+      if (!entry) return;
+      try {
         const response = await fetch('/v1/streams', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ spec: parseData.spec })
+          body: JSON.stringify({ spec: entry.spec }),
         });
-
-        const data = await response.json();
-
-        if (!response.ok || !data.stream_id) {
-          console_elem.innerHTML += `> ERROR: ${data.detail || JSON.stringify(data)}\n`;
-          document.getElementById('headerStatus').textContent = 'Error';
-          return;
-        }
-
-        console_elem.innerHTML += `> Stream ID: ${data.stream_id}\n`;
-        console_elem.innerHTML += `> Establishing WebSocket connection...\n`;
-
-        document.getElementById('headerStreamCount').textContent = '1';
-
-        initializeDisplay(exchangeConfigs);
-
-        if (ws) ws.close();
-
-        const wsUrl = data.ws_url.replace('localhost', window.location.hostname);
-        ws = new WebSocket(wsUrl);
-
-        let lastUpdateTime = null;
-        let updateCount = 0;
-
-        ws.onopen = () => {
-          console_elem.innerHTML += '> Connected - Streaming live data\n';
-          document.getElementById('perfStats').classList.add('active');
-          document.getElementById('dataGrid').classList.add('active');
-          document.getElementById('configInterval').textContent = parseData.spec.interval_sec + 's';
-          document.getElementById('updateStatus').textContent = '🟢 Active';
-          document.getElementById('updateStatus').style.color = 'var(--accent-green)';
-          document.getElementById('headerStatus').textContent = 'Active';
-          document.getElementById('headerStatus').style.color = 'var(--accent-green)';
-          lastUpdateTime = Date.now();
-
-          // Initialize tweet tile if Nitter source exists
-          const hasNitterSource = parseData.spec.sources && parseData.spec.sources.some(s => s.type === 'nitter');
-          if (hasNitterSource) {
-            const dataGrid = document.getElementById('dataGrid');
-            const nitterSource = parseData.spec.sources.find(s => s.type === 'nitter');
-            const username = nitterSource.username || 'user';
-
-            const tileHtml = `
-              <div class="data-tile" id="tile_nitter_tweet" style="grid-column: 1 / -1;">
-                <div class="tile-header">
-                  <div class="tile-label">Latest Tweet from @${username}</div>
-                  <div class="tile-source">TWITTER/X</div>
-                </div>
-                <div class="tile-value waiting" style="font-size: 14px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; min-height: 60px;">Waiting for tweet data...</div>
-                <div class="tweet-timestamp" style="font-size: 12px; color: var(--text-muted); margin-top: 8px;"></div>
-                <div class="tweet-stats" style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;"></div>
-              </div>
-            `;
-            dataGrid.innerHTML = tileHtml;
-          }
-        };
-
-        ws.onmessage = (event) => {
-          const streamEvent = JSON.parse(event.data);
-
-          const now = Date.now();
-          const timeSinceLastUpdate = lastUpdateTime ? (now - lastUpdateTime) / 1000 : 0;
-          lastUpdateTime = now;
-          updateCount++;
-
-          document.getElementById('updateSpeed').textContent = timeSinceLastUpdate.toFixed(3) + 's';
-          document.getElementById('updateCount').textContent = updateCount;
-          document.getElementById('headerLatency').textContent = (timeSinceLastUpdate * 1000).toFixed(0) + 'ms';
-
-          const speedEl = document.getElementById('updateSpeed');
-          if (timeSinceLastUpdate < 0.5) {
-            speedEl.className = 'perf-value green';
-          } else if (timeSinceLastUpdate < 2) {
-            speedEl.className = 'perf-value blue';
-          } else {
-            speedEl.className = 'perf-value gray';
-          }
-
-          updateDataDisplay(streamEvent);
-        };
-
-        ws.onerror = () => {
-          console_elem.innerHTML += '> WebSocket error\n';
-          document.getElementById('headerStatus').textContent = 'Error';
-          document.getElementById('headerStatus').style.color = 'var(--accent-red)';
-        };
-
-        ws.onclose = () => {
-          console_elem.innerHTML += '> Connection closed\n';
-          document.getElementById('headerStatus').textContent = 'Disconnected';
-          document.getElementById('headerStatus').style.color = 'var(--text-muted)';
-        };
-
-      } catch (error) {
-        console_elem.innerHTML += `> EXCEPTION: ${error.message}\n`;
-        document.getElementById('headerStatus').textContent = 'Error';
+        if (!response.ok) throw new Error(await response.text());
+        const stream = await response.json();
+        appendMessage('agent', `Duplicated stream as <code>${escapeHtml(stream.stream_id)}</code>.`);
+        addSession(stream.stream_id, stream.ws_url, entry.spec);
+        loadStream(stream.stream_id);
+      } catch (err) {
+        appendMessage('agent', `Duplicate failed: ${escapeHtml(err.message)}`);
       }
     }
 
-    function updateDataDisplay(event) {
-      if (event.raw_data && event.raw_data.exchange_data) {
-        currentConfig.forEach(config => {
-          const exchangeData = event.raw_data.exchange_data[config.exchange];
-          if (!exchangeData) {
-            return;
-          }
-          const symbolEntries = exchangeData.symbols || {};
-          const symbols = (config.symbols && config.symbols.length > 0) ? config.symbols : [null];
-
-          symbols.forEach(symbol => {
-            config.fields.forEach(field => {
-              const tileId = symbol
-                ? `tile_${config.exchange}_${sanitizeIdPart(symbol)}_${field}`
-                : `tile_${config.exchange}_${field}`;
-              const tile = document.getElementById(tileId);
-              if (!tile) {
-                return;
-              }
-
-              let value;
-              if (symbol) {
-                const possibleKeys = [
-                  symbol,
-                  symbol.toUpperCase(),
-                  symbol.replace('/USDT', ''),
-                  symbol.split('/')[0]
-                ];
-                for (const key of possibleKeys) {
-                  if (key && symbolEntries[key]) {
-                    value = symbolEntries[key][field];
-                    if (value !== undefined) {
-                      break;
-                    }
-                  }
-                }
-              } else {
-                value = exchangeData[field];
-              }
-
-              if (value !== undefined && value !== null) {
-                const valueDiv = tile.querySelector('.tile-value');
-                valueDiv.classList.remove('waiting');
-                if (typeof value === 'number') {
-                  const isVolume = field === 'volume';
-                  const formatted = value.toLocaleString('en-US', {
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: 2
-                  });
-                  valueDiv.textContent = isVolume ? formatted : '$' + formatted;
-                } else {
-                  valueDiv.textContent = value;
-                }
-              }
-            });
-          });
-        });
-      }
-
-      const tweetsTile = document.getElementById('tile_tweets');
-      if (tweetsTile && event.tweets !== undefined) {
-        const valueDiv = tweetsTile.querySelector('.tile-value');
-        valueDiv.classList.remove('waiting');
-        valueDiv.textContent = event.tweets;
-      }
-
-      const onchainTile = document.getElementById('tile_onchain');
-      if (onchainTile && event.onchain_count !== undefined) {
-        const valueDiv = onchainTile.querySelector('.tile-value');
-        valueDiv.classList.remove('waiting');
-        valueDiv.textContent = event.onchain_count;
-      }
-
-      // Handle Nitter tweet data (from raw_data.tweet_data or direct event)
-      const tweetData = event.raw_data?.tweet_data || (event.event_type === 'tweet' ? event : null);
-      if (tweetData && tweetData.text) {
-        let nitterTile = document.getElementById('tile_nitter_tweet');
-
-        if (nitterTile) {
-          // Update tweet text
-          const valueDiv = nitterTile.querySelector('.tile-value');
-          valueDiv.classList.remove('waiting');
-          valueDiv.textContent = tweetData.text;
-
-          // Update username in label
-          const labelDiv = nitterTile.querySelector('.tile-label');
-          if (labelDiv && tweetData.symbol) {
-            labelDiv.textContent = `Latest Tweet from @${tweetData.symbol.toLowerCase()}`;
-          }
-
-          // Update timestamp
-          const timestampDiv = nitterTile.querySelector('.tweet-timestamp');
-          if (timestampDiv && tweetData.timestamp_posted) {
-            timestampDiv.textContent = `Posted: ${tweetData.timestamp_posted}`;
-          }
-
-          // Update stats
-          const statsDiv = nitterTile.querySelector('.tweet-stats');
-          if (statsDiv && tweetData.stats) {
-            statsDiv.textContent = `💬 ${tweetData.stats.replies || 0} | 🔁 ${tweetData.stats.retweets || 0} | ❤️ ${tweetData.stats.likes || 0}`;
-          }
-        }
-      }
-
-      if (event.raw_data && event.raw_data.custom_data) {
-        const customData = event.raw_data.custom_data;
-        if (customData.source === 'google_trends' && customData.keyword) {
-          const keyword = customData.keyword;
-          const tileId = `tile_trends_${keyword.replace(/\s+/g, '_')}`;
-          const tile = document.getElementById(tileId);
-
-          if (tile && customData.interest !== undefined) {
-            const valueDiv = tile.querySelector('.tile-value');
-            valueDiv.classList.remove('waiting');
-            valueDiv.textContent = `${customData.interest}/100`;
-
-            if (customData.interest >= 75) {
-              valueDiv.style.color = 'var(--accent-green)';
-            } else if (customData.interest >= 50) {
-              valueDiv.style.color = 'var(--accent-blue)';
-            } else {
-              valueDiv.style.color = 'var(--text-muted)';
-            }
-          }
-        }
+    async function downloadSpec(streamId) {
+      try {
+        const response = await fetch(`/v1/streams/${streamId}/spec`);
+        if (!response.ok) throw new Error(await response.text());
+        const spec = await response.json();
+        const blob = new Blob([JSON.stringify(spec, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `${streamId}_spec.json`;
+        link.click();
+        URL.revokeObjectURL(url);
+      } catch (err) {
+        appendMessage('agent', `Spec download failed: ${escapeHtml(err.message)}`);
       }
     }
+
+    async function stopStream(streamId) {
+      const entry = activeStreams.get(streamId);
+      if (!entry) return;
+      try {
+        await fetch(`/v1/streams/${streamId}`, { method: 'DELETE' });
+        appendMessage('agent', `Stream ${escapeHtml(streamId)} stopped.`);
+        if (entry.socket) {
+          entry.socket.close();
+          entry.socket = null;
+        }
+        activeStreams.delete(streamId);
+        if (streamId === currentStreamId) {
+          currentStreamId = null;
+          detailBody.innerHTML = '<div class="panel column-merge" style="text-align:center;opacity:0.6;"><h3>Stream stopped</h3><p style="font-size:13px;color:var(--text-muted);">Select another stream or launch a new one.</p></div>';
+          streamStatus.style.display = 'none';
+        }
+        renderSessions();
+      } catch (err) {
+        appendMessage('agent', `Failed to stop stream: ${escapeHtml(err.message)}`);
+      }
+    }
+
+    function renderLatencySparkline(stream) {
+      const container = document.getElementById(`latencySpark-${stream.streamId}`);
+      if (!container) return;
+      const canvas = container.querySelector('canvas');
+      const ctx = canvas.getContext('2d');
+      const chartData = stream.latencyHistory.slice(-20);
+      if (!chartData.length) {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = 'var(--text-muted)';
+        ctx.font = '11px var(--mono)';
+        ctx.fillText('No latency samples yet', 10, 28);
+        return;
+      }
+      const maxLatency = Math.max(...chartData);
+      const minLatency = Math.min(...chartData);
+      const span = maxLatency - minLatency || 1;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.strokeStyle = 'rgba(59,130,246,0.6)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      chartData.forEach((value, idx) => {
+        const x = (idx / (chartData.length - 1)) * canvas.width;
+        const y = canvas.height - ((value - minLatency) / span) * (canvas.height - 4) - 2;
+        if (idx === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+    }
+
+    document.addEventListener('keydown', (event) => {
+      if (event.metaKey && event.key.toLowerCase() === 'n') {
+        event.preventDefault();
+        messageInput.focus();
+      }
+      if (event.metaKey && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        pauseAll = !pauseAll;
+        appendMessage('agent', pauseAll ? 'All streams paused (not yet implemented).' : 'Resume streams (not yet implemented).');
+      }
+    });
+
+    appendMessage('agent', `Bond Agent ready.
+    <div style="margin-top:12px;font-size:12px;color:var(--text-muted);">
+      Try: “Stream BTC/USDT every 5 seconds.”
+    </div>`);
   </script>
 </body>
 </html>
