@@ -97,6 +97,15 @@ def _parse_natural_language(text: str) -> dict[str, Any]:
       {"type": "custom", "mode": "mock_liq"},
     ]
 
+  if any(kw in text_lower for kw in ["future", "futures", "perp", "perpetual"]):
+    for source in sources:
+      if source.get("type") == "ccxt":
+        source["market_type"] = "futures"
+  elif "spot" in text_lower:
+    for source in sources:
+      if source.get("type") == "ccxt":
+        source["market_type"] = "spot"
+
   return {
     "sources": sources,
     "interval_sec": interval_sec,

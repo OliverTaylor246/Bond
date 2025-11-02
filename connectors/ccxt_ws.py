@@ -12,7 +12,66 @@ import ccxt.pro as ccxtpro
 from engine.schemas import TradeEvent
 
 
-EXCHANGES = ["binance", "binanceus", "kraken", "kucoin"]
+def resolve_symbol_map(
+  exchange_client: Any,
+  requested_symbols: list[str],
+  market_type: Optional[str],
+) -> dict[str, str]:
+  """Map requested user symbols to symbols recognized by the exchange."""
+  normalized = normalize_market_type(market_type)
+  allowed_types = _allowed_market_types(normalized)
+
+  resolved: dict[str, str] = {}
+  missing: list[str] = []
+
+  for raw_symbol in requested_symbols:
+    try:
+      market = exchange_client.market(raw_symbol)
+      if market:
+        resolved[raw_symbol] = market["symbol"]
+        continue
+    except Exception:
+      pass
+
+    base, _, quote = raw_symbol.partition("/")
+    base = base or raw_symbol
+    quote = quote or None
+
+    candidate_symbol = None
+    for market in exchange_client.markets.values():
+      market_type_value = market.get("type") or market.get("contractType")
+      if allowed_types and market_type_value and market_type_value not in allowed_types:
+        continue
+
+      market_base = market.get("base") or market.get("underlying")
+      market_quote = market.get("quote")
+      settle = market.get("settle")
+
+      if market_base != base:
+        continue
+
+      if quote and market_quote != quote and settle != quote:
+        continue
+
+      candidate_symbol = market.get("symbol")
+      if candidate_symbol:
+        break
+
+    if candidate_symbol:
+      resolved[raw_symbol] = candidate_symbol
+    else:
+      missing.append(raw_symbol)
+
+  if missing:
+    raise ValueError(
+      f"No matching markets for symbols {missing} on {exchange_client.id}"
+      f" (market_type={normalized or 'spot'})"
+    )
+
+  return resolved
+
+
+EXCHANGES = ["binanceus", "binance"]
 
 INTERVAL_TO_TIMEFRAME = {
   1: "1s",
@@ -53,6 +112,16 @@ def normalize_market_type(market_type: Optional[str]) -> Optional[str]:
     "perpetual": "swap",
   }
   return mapping.get(mt, mt)
+
+
+def _allowed_market_types(normalized: Optional[str]) -> Optional[set[str]]:
+  if not normalized or normalized in {"spot", "margin"}:
+    return None
+  if normalized == "future":
+    return {"future"}
+  if normalized == "swap":
+    return {"swap"}
+  return {normalized}
 
 
 def build_stream_params(market_type: Optional[str]) -> dict[str, Any]:
@@ -282,9 +351,11 @@ async def ccxt_ws_exchange_stream(
 
   ex = create_pro_client(exchange, market_type)
   await ex.load_markets()
-  if not getattr(ex, "has", {}).get("watchOHLCV"):
-    raise RuntimeError(f"Exchange {exchange} does not support watchOHLCV")
+  symbol_map = resolve_symbol_map(ex, symbols, market_type)
+  resolved_symbols = list(dict.fromkeys(symbol_map.values()))
+  reverse_map = {resolved: requested for requested, resolved in symbol_map.items()}
   params = build_stream_params(market_type)
+  queue: asyncio.Queue[object] = asyncio.Queue()
 
   capabilities = getattr(ex, "has", {}) or {}
   supports_batch = bool(capabilities.get("watchTickers"))
@@ -297,72 +368,91 @@ async def ccxt_ws_exchange_stream(
     )
 
   try:
-    if supports_batch and len(symbols) > 1:
+    if supports_batch and len(resolved_symbols) > 1:
       while True:
         try:
-          tickers = await ex.watch_tickers(symbols, params)
-          for sym, ticker in tickers.items():
+          tickers = await ex.watch_tickers(resolved_symbols, params)
+          for resolved_symbol, ticker in tickers.items():
             if not ticker:
               continue
-            yield _ticker_to_event(ex.id, sym, ticker)
+            event = _ticker_to_event(ex.id, resolved_symbol, ticker)
+            event["requested_symbol"] = reverse_map.get(resolved_symbol, resolved_symbol)
+            yield event
         except asyncio.CancelledError:
           raise
         except Exception as err:
           print(f"[ccxt_ws] watch_tickers error {exchange}: {err}", flush=True)
-          await asyncio.sleep(1.0)
+          await ex.close()
+          raise
     else:
-      queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
-
-      async def seed_ticker(sym: str) -> None:
+      async def seed_ticker(requested_symbol: str, resolved_symbol: str) -> None:
         try:
           rest_exchange = create_rest_client(exchange, market_type)
           try:
             ticker = await asyncio.to_thread(
               rest_exchange.fetch_ticker,
-              sym,
+              resolved_symbol,
               params,
             )
             if ticker:
-              await queue.put(_ticker_to_event(rest_exchange.id, sym, ticker))
+              event = _ticker_to_event(rest_exchange.id, resolved_symbol, ticker)
+              event["requested_symbol"] = requested_symbol
+              await queue.put(event)
           finally:
             close_fn = getattr(rest_exchange, "close", None)
             if callable(close_fn):
               close_fn()
         except Exception as err:
-          print(f"[ccxt_ws] Seed ticker error {exchange} {sym}: {err}", flush=True)
+          print(f"[ccxt_ws] Seed ticker error {exchange} {resolved_symbol}: {err}", flush=True)
+          await queue.put(err)
 
-      async def pump_watch_ticker(sym: str) -> None:
+      async def pump_watch_ticker(requested_symbol: str, resolved_symbol: str) -> None:
         while True:
           try:
-            ticker = await ex.watch_ticker(sym, params)
+            ticker = await ex.watch_ticker(resolved_symbol, params)
             if ticker:
-              await queue.put(_ticker_to_event(ex.id, sym, ticker))
+              event = _ticker_to_event(ex.id, resolved_symbol, ticker)
+              event["requested_symbol"] = requested_symbol
+              await queue.put(event)
           except asyncio.CancelledError:
             raise
           except Exception as err:
-            print(f"[ccxt_ws] watch_ticker error {exchange} {sym}: {err}", flush=True)
-            await asyncio.sleep(1.0)
+            print(f"[ccxt_ws] watch_ticker error {exchange} {resolved_symbol}: {err}", flush=True)
+            await queue.put(err)
+            return
 
-      async def pump_trades(sym: str) -> None:
+      async def pump_trades(requested_symbol: str, resolved_symbol: str) -> None:
         try:
           async for event in ccxt_ws_stream(
-            sym,
+            resolved_symbol,
             exchange,
             exchange_instance=ex,
             market_type=market_type,
+            requested_symbol=requested_symbol,
           ):
             await queue.put(event)
         except asyncio.CancelledError:
           raise
         except Exception as err:
-          print(f"[ccxt_ws] Pump trades error {exchange} {sym}: {err}", flush=True)
+          print(f"[ccxt_ws] Pump trades error {exchange} {resolved_symbol}: {err}", flush=True)
+          await queue.put(err)
+          return
 
-      seed_tasks = [asyncio.create_task(seed_ticker(sym)) for sym in symbols]
+      seed_tasks = [
+        asyncio.create_task(seed_ticker(req, res))
+        for req, res in symbol_map.items()
+      ]
       tasks: list[asyncio.Task] = []
       if supports_single:
-        tasks = [asyncio.create_task(pump_watch_ticker(sym)) for sym in symbols]
+        tasks = [
+          asyncio.create_task(pump_watch_ticker(req, res))
+          for req, res in symbol_map.items()
+        ]
       elif supports_trades:
-        tasks = [asyncio.create_task(pump_trades(sym)) for sym in symbols]
+        tasks = [
+          asyncio.create_task(pump_trades(req, res))
+          for req, res in symbol_map.items()
+        ]
       else:
         raise RuntimeError(
           f"Exchange {exchange} lacks watchTicker but also cannot fallback to trades"
@@ -370,8 +460,11 @@ async def ccxt_ws_exchange_stream(
 
       try:
         while True:
-          event = await queue.get()
-          yield event
+          item = await queue.get()
+          if isinstance(item, BaseException):
+            await ex.close()
+            raise item
+          yield item
       finally:
         for seed in seed_tasks:
           seed.cancel()
@@ -407,30 +500,38 @@ async def ccxt_ws_candle_stream(
 
   ex = create_pro_client(exchange, market_type)
   await ex.load_markets()
-  queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+  capabilities = getattr(ex, "has", {}) or {}
+  if not capabilities.get("watchOHLCV"):
+    await ex.close()
+    raise RuntimeError(f"Exchange {exchange} does not support watchOHLCV")
+
+  symbol_map = resolve_symbol_map(ex, symbols, market_type)
+  queue: asyncio.Queue[object] = asyncio.Queue()
   params = build_stream_params(market_type)
 
-  async def seed_symbol(sym: str) -> None:
+  async def seed_symbol(requested_symbol: str, resolved_symbol: str) -> None:
     """Fetch the most recent closed candle to populate data immediately."""
     try:
-      candles = await ex.fetch_ohlcv(sym, timeframe, limit=1, params=params)
+      candles = await ex.fetch_ohlcv(resolved_symbol, timeframe, limit=1, params=params)
       if candles:
-        await queue.put(_candle_to_event(ex.id, sym, candles[-1], timeframe))
+        event = _candle_to_event(ex.id, resolved_symbol, candles[-1], timeframe)
+        event["requested_symbol"] = requested_symbol
+        await queue.put(event)
     except AttributeError:
       rest_exchange = create_rest_client(exchange, market_type)
       try:
         candles = await asyncio.to_thread(
           rest_exchange.fetch_ohlcv,
-          sym,
+          resolved_symbol,
           timeframe,
           None,
           1,
           params,
         )
         if candles:
-          await queue.put(
-            _candle_to_event(rest_exchange.id, sym, candles[-1], timeframe)
-          )
+          event = _candle_to_event(rest_exchange.id, resolved_symbol, candles[-1], timeframe)
+          event["requested_symbol"] = requested_symbol
+          await queue.put(event)
       finally:
         close_fn = getattr(rest_exchange, "close", None)
         if callable(close_fn):
@@ -438,27 +539,42 @@ async def ccxt_ws_candle_stream(
     except asyncio.CancelledError:
       raise
     except Exception as err:
-      print(f"[ccxt_ws] Seed candle error {exchange} {sym}: {err}", flush=True)
+      print(f"[ccxt_ws] Seed candle error {exchange} {resolved_symbol}: {err}", flush=True)
+      await queue.put(err)
 
-  async def watch_symbol(sym: str) -> None:
+  async def watch_symbol(requested_symbol: str, resolved_symbol: str) -> None:
     """Subscribe to live candle updates and forward the latest data."""
     try:
-      async for candles in ex.watch_ohlcv(sym, timeframe, params=params):
+      while True:
+        candles = await ex.watch_ohlcv(resolved_symbol, timeframe, params=params)
         if candles:
-          await queue.put(_candle_to_event(ex.id, sym, candles[-1], timeframe))
+          event = _candle_to_event(ex.id, resolved_symbol, candles[-1], timeframe)
+          event["requested_symbol"] = requested_symbol
+          await queue.put(event)
     except asyncio.CancelledError:
       raise
     except Exception as err:
-      print(f"[ccxt_ws] watch_ohlcv error {exchange} {sym}: {err}", flush=True)
+      print(f"[ccxt_ws] watch_ohlcv error {exchange} {resolved_symbol}: {err}", flush=True)
+      await queue.put(err)
+      return
 
-  seed_tasks = [asyncio.create_task(seed_symbol(sym)) for sym in symbols]
-  watch_tasks = [asyncio.create_task(watch_symbol(sym)) for sym in symbols]
+  seed_tasks = [
+    asyncio.create_task(seed_symbol(req, res))
+    for req, res in symbol_map.items()
+  ]
+  watch_tasks = [
+    asyncio.create_task(watch_symbol(req, res))
+    for req, res in symbol_map.items()
+  ]
   tasks = seed_tasks + watch_tasks
 
   try:
     while True:
-      event = await queue.get()
-      yield event
+      item = await queue.get()
+      if isinstance(item, BaseException):
+        await ex.close()
+        raise item
+      yield item
   finally:
     for task in tasks:
       task.cancel()

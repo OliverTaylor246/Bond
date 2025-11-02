@@ -91,6 +91,11 @@ async def create_stream(req: CreateStreamRequest):
   # Compile spec
   if req.natural_language:
     spec = compile_spec(req.natural_language)
+    print(
+      "[api] NL request parsed to StreamSpec:",
+      spec.model_dump(),
+      flush=True,
+    )
   elif req.spec:
     spec = compile_spec(req.spec)
   else:
@@ -266,9 +271,15 @@ async def parse_nl_stream(req: NLParseRequest):
 
     # Add exchange sources (one source per exchange with all symbols)
     for exchange_cfg in config["exchanges"]:
+      exchange_name = (exchange_cfg.get("exchange") or "").lower()
+      if exchange_name == "binance":
+        exchange_name = "binanceus"
+      elif not exchange_name:
+        exchange_name = "binanceus"
+
       spec["sources"].append({
         "type": "ccxt",
-        "exchange": exchange_cfg["exchange"],
+        "exchange": exchange_name,
         "fields": exchange_cfg["fields"],
         "symbols": [f"{symbol}/USDT" for symbol in config["symbols"]]
       })
