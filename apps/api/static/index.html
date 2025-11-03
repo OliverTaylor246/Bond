@@ -9,18 +9,24 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <style>
     :root {
-      --bg: #060b16;
-      --panel: #0e1627;
-      --panel-strong: #111c33;
-      --border: #1f2f4a;
-      --accent: #3b82f6;
-      --accent-soft: rgba(59, 130, 246, 0.18);
-      --success: #16a34a;
-      --warn: #d97706;
-      --error: #dc2626;
-      --text: #e6ecff;
-      --text-muted: #8aa1c5;
+      --bg: #07070a;
+      --panel: #05070c;
+      --panel-strong: #161c26;
+      --panel-ghost: rgba(36, 39, 43, 0.82);
+      --border: rgba(74, 82, 90, 0.55);
+      --border-soft: rgba(62, 120, 178, 0.32);
+      --accent: #004ba8;
+      --accent-alt: #3e78b2;
+      --accent-soft: rgba(62, 120, 178, 0.2);
+      --accent-strong: rgba(0, 75, 168, 0.45);
+      --success: #2dd4bf;
+      --warn: #fbbf24;
+      --error: #f87171;
+      --text: #f3f6ff;
+      --text-muted: #97a3ba;
       --mono: 'JetBrains Mono', monospace;
+      --glow: rgba(0, 75, 168, 0.3);
+      --gradient-radial: radial-gradient(135% 160% at 50% 0%, rgba(62, 120, 178, 0.24), rgba(7, 7, 10, 0.92));
     }
 
     * {
@@ -30,7 +36,7 @@
     }
 
     body {
-      background: var(--bg);
+      background: var(--gradient-radial), var(--bg);
       color: var(--text);
       font-family: 'Inter', sans-serif;
       min-height: 100vh;
@@ -39,82 +45,128 @@
     }
 
     header {
-      height: 62px;
-      border-bottom: 1px solid rgba(31, 47, 74, 0.85);
-      background: #0b1323;
+      height: 72px;
+      background: linear-gradient(135deg, rgba(36, 39, 43, 0.95), rgba(7, 7, 10, 0.94));
+      border-bottom: 1px solid rgba(62, 120, 178, 0.28);
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 0 28px;
+      gap: 32px;
+      padding: 0 36px;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      box-shadow: 0 14px 40px rgba(4, 6, 12, 0.6);
     }
 
-    header .brand {
+    .brand {
       display: flex;
-      align-items: center;
-      gap: 16px;
+      flex-direction: column;
+      gap: 4px;
     }
 
-    header .brand h1 {
-      font-size: 20px;
+    .brand h1 {
+      font-size: 22px;
       font-weight: 600;
       letter-spacing: -0.02em;
     }
 
-    header nav {
-      display: flex;
-      gap: 10px;
-      align-items: center;
+    .brand span {
+      font-size: 13px;
+      color: rgba(247, 249, 255, 0.65);
     }
 
-    header button,
-    header a {
-      border: 1px solid rgba(59, 130, 246, 0.28);
-      background: rgba(13, 21, 36, 0.85);
+    .nav-link {
+      appearance: none;
+      border: 1px solid transparent;
+      background: transparent;
+      color: var(--text-muted);
+      font-size: 14px;
+      font-weight: 500;
+      padding: 8px 18px;
+      border-radius: 999px;
+      cursor: pointer;
+      transition: all 0.18s ease;
+    }
+
+    .nav-link:hover {
+      color: var(--text);
+      border-color: rgba(0, 75, 168, 0.4);
+    }
+
+    .nav-link.active {
+      color: var(--text);
+      background: var(--accent-soft);
+      border-color: var(--accent-strong);
+      box-shadow: 0 12px 24px rgba(0, 75, 168, 0.25);
+    }
+
+    .toolbar {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-left: auto;
+    }
+
+    .toolbar button,
+    .toolbar a {
+      border: 1px solid rgba(62, 120, 178, 0.28);
+      background: rgba(36, 39, 43, 0.78);
       color: var(--text);
       font-size: 13px;
       padding: 8px 14px;
-      border-radius: 10px;
+      border-radius: 12px;
       display: inline-flex;
       align-items: center;
       gap: 8px;
       cursor: pointer;
       text-decoration: none;
-      transition: transform 0.15s ease, background 0.15s ease;
+      transition: transform 0.15s ease, background 0.15s ease, border-color 0.15s ease;
     }
 
-    header button.primary {
-      background: linear-gradient(135deg, rgba(59,130,246,0.9), rgba(37,99,235,0.85));
-      border-color: rgba(59,130,246,0.55);
-      box-shadow: 0 10px 24px rgba(59,130,246,0.25);
+    .toolbar a {
+      text-decoration: none;
     }
 
-    header button:hover,
-    header a:hover {
+    .toolbar button.primary {
+      background: linear-gradient(135deg, rgba(0, 75, 168, 0.85), rgba(62, 120, 178, 0.85));
+      border-color: rgba(0, 75, 168, 0.45);
+      box-shadow: 0 14px 38px rgba(0, 75, 168, 0.35);
+    }
+
+    .toolbar button:hover,
+    .toolbar a:hover {
       transform: translateY(-1px);
-      background: rgba(27, 39, 58, 0.95);
+      border-color: rgba(0, 75, 168, 0.45);
+      background: rgba(36, 39, 43, 0.92);
     }
 
-    header button.primary:hover {
+    .toolbar button.primary:hover {
       transform: translateY(-2px);
     }
 
     main {
       flex: 1;
       display: flex;
+      gap: 28px;
+      padding: 36px;
       min-height: 0;
     }
 
     .left-pane {
       width: 360px;
-      border-right: 1px solid rgba(31, 47, 74, 0.8);
-      background: rgba(10, 17, 30, 0.92);
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 22px;
       display: flex;
       flex-direction: column;
+      overflow: hidden;
+      box-shadow: 0 24px 60px rgba(4, 6, 12, 0.55);
     }
 
     .session-list {
-      padding: 18px 16px;
-      border-bottom: 1px solid rgba(31,47,74,0.7);
+      padding: 22px 22px 18px;
+      border-bottom: 1px solid rgba(62, 120, 178, 0.16);
       display: flex;
       justify-content: space-between;
       align-items: center;
@@ -123,13 +175,31 @@
     .session-list h2 {
       font-size: 15px;
       font-weight: 600;
-      letter-spacing: 0.02em;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: rgba(247, 249, 255, 0.75);
+    }
+
+    #sessionNewBtn {
+      border: 1px solid rgba(62,120,178,0.32);
+      background: rgba(62,120,178,0.18);
+      color: var(--accent);
+      padding: 6px 12px;
+      border-radius: 999px;
+      font-size: 12px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    #sessionNewBtn:hover {
+      background: rgba(62,120,178,0.26);
     }
 
     .sessions {
-      flex: 1;
+      flex: 0 0 auto;
+      max-height: 220px;
       overflow-y: auto;
-      padding: 16px;
+      padding: 18px 22px;
       display: flex;
       flex-direction: column;
       gap: 12px;
@@ -137,21 +207,21 @@
 
     .session-item {
       padding: 14px;
-      border-radius: 12px;
-      border: 1px solid rgba(59, 130, 246, 0.22);
-      background: rgba(59, 130, 246, 0.08);
+      border-radius: 14px;
+      border: 1px solid rgba(62,120,178,0.18);
+      background: rgba(36, 39, 43, 0.7);
       cursor: pointer;
       display: flex;
       flex-direction: column;
       gap: 8px;
-      transition: transform 0.15s ease, border 0.15s ease;
+      transition: transform 0.15s ease, border-color 0.15s ease, background 0.15s ease;
     }
 
-    .session-item.active,
-    .session-item:hover {
+    .session-item:hover,
+    .session-item.active {
       transform: translateY(-2px);
-      border-color: rgba(59,130,246,0.4);
-      background: rgba(59, 130, 246, 0.12);
+      border-color: rgba(0,75,168,0.38);
+      background: rgba(62,120,178,0.22);
     }
 
     .session-item span {
@@ -159,182 +229,233 @@
       color: var(--text-muted);
     }
 
+    .session-empty {
+      padding: 32px 0;
+      text-align: center;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
     .chat-log {
-      height: 260px;
+      flex: 1;
       overflow-y: auto;
-      padding: 14px 16px;
+      padding: 22px;
       display: flex;
       flex-direction: column;
-      gap: 10px;
-      border-top: 1px solid rgba(31, 47, 74, 0.6);
-      border-bottom: 1px solid rgba(31, 47, 74, 0.6);
+      gap: 12px;
+      border-top: 1px solid rgba(62, 120, 178, 0.14);
+      border-bottom: 1px solid rgba(62, 120, 178, 0.14);
+      background: rgba(24, 29, 38, 0.7);
     }
 
     .chat-msg {
       display: flex;
-      gap: 8px;
+      gap: 10px;
       font-size: 13px;
       animation: fadeIn 0.12s ease-out;
     }
 
-    .chat-msg.agent { flex-direction: row; }
-    .chat-msg.user { flex-direction: row-reverse; }
+    .chat-msg.agent {
+      flex-direction: row;
+    }
+
+    .chat-msg.user {
+      flex-direction: row-reverse;
+    }
 
     .avatar {
-      width: 26px;
-      height: 26px;
-      border-radius: 8px;
+      width: 28px;
+      height: 28px;
+      border-radius: 10px;
       display: grid;
       place-items: center;
-      background: rgba(59, 130, 246, 0.18);
+      background: var(--accent-soft);
       font-family: var(--mono);
       font-size: 11px;
-      letter-spacing: 0.06em;
+      letter-spacing: 0.08em;
       color: var(--accent);
     }
 
     .chat-msg.agent .avatar {
-      background: rgba(59, 130, 246, 0.35);
-      color: #f8fbff;
+      background: rgba(0,75,168,0.45);
+      color: #f2f7ff;
     }
 
     .bubble {
-      max-width: 80%;
-      background: rgba(15, 24, 39, 0.92);
-      border: 1px solid rgba(59, 130, 246, 0.18);
-      border-radius: 10px;
-      padding: 10px 12px;
-      line-height: 1.5;
+      max-width: 82%;
+      background: rgba(24, 29, 38, 0.95);
+      border: 1px solid rgba(62, 120, 178, 0.22);
+      border-radius: 14px;
+      padding: 12px 14px;
+      line-height: 1.58;
+      color: var(--text);
+      box-shadow: 0 10px 28px rgba(4, 6, 12, 0.45);
     }
 
     .chat-msg.user .bubble {
-      background: rgba(59, 130, 246, 0.12);
-      border-color: rgba(59, 130, 246, 0.25);
-      color: #dbeafe;
+      background: rgba(0,75,168,0.18);
+      border-color: rgba(0,75,168,0.32);
+      color: #e7f0ff;
     }
 
     .chat-input {
-      border-bottom: 1px solid rgba(31,47,74,0.6);
-      padding: 12px 16px;
+      padding: 18px 22px 22px;
       display: flex;
       flex-direction: column;
-      gap: 8px;
+      gap: 12px;
+      background: rgba(20, 25, 33, 0.88);
     }
 
     .chat-input textarea {
-      height: 110px;
+      min-height: 130px;
       resize: none;
-      border-radius: 10px;
-      background: rgba(9, 15, 27, 0.9);
-      border: 1px solid rgba(45, 64, 96, 0.8);
+      border-radius: 14px;
+      background: rgba(14, 18, 26, 0.9);
+      border: 1px solid rgba(62,120,178,0.24);
       color: var(--text);
-      padding: 10px 12px;
+      padding: 12px 14px;
       font-size: 13px;
-      line-height: 1.55;
+      line-height: 1.6;
     }
 
     .chat-input textarea:focus {
       outline: none;
-      border-color: rgba(59,130,246,0.5);
-      box-shadow: 0 0 0 1px rgba(59,130,246,0.15);
-      background: rgba(13,22,37,0.95);
+      border-color: rgba(0,75,168,0.5);
+      box-shadow: 0 0 0 1px rgba(0,75,168,0.2);
+      background: rgba(20, 26, 36, 0.95);
     }
 
     .chat-input button {
       align-self: flex-end;
-      border-radius: 10px;
-      border: 1px solid rgba(59,130,246,0.35);
-      background: rgba(59,130,246,0.16);
-      color: #dbeafe;
-      padding: 6px 12px;
+      border-radius: 12px;
+      border: 1px solid rgba(62,120,178,0.32);
+      background: rgba(62,120,178,0.22);
+      color: #e2ecff;
+      padding: 8px 16px;
       font-size: 12px;
+      font-weight: 500;
       cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .chat-input button:hover {
+      background: rgba(62,120,178,0.32);
     }
 
     .detail-pane {
       flex: 1;
+      background: var(--panel-strong);
+      border: 1px solid var(--border);
+      border-radius: 24px;
       display: flex;
       flex-direction: column;
       overflow: hidden;
+      box-shadow: 0 24px 60px rgba(4, 6, 12, 0.55);
     }
 
     .detail-header {
-      padding: 20px 30px;
-      border-bottom: 1px solid rgba(31, 47, 74, 0.75);
-      background: rgba(12, 18, 31, 0.98);
+      padding: 26px 30px;
+      border-bottom: 1px solid rgba(62,120,178,0.18);
+      background: rgba(24, 29, 38, 0.9);
       display: flex;
       justify-content: space-between;
-      gap: 40px;
+      gap: 32px;
+      align-items: flex-start;
     }
 
     .detail-header .summary {
       display: flex;
       flex-direction: column;
-      gap: 8px;
+      gap: 10px;
     }
 
-    .summary h2 {
-      font-size: 22px;
+    .detail-header h2 {
+      font-size: 24px;
       font-weight: 600;
       letter-spacing: -0.015em;
     }
 
-    .summary meta-row {
+    .detail-header .summary div {
       display: flex;
-      gap: 16px;
+      gap: 18px;
       font-size: 13px;
       color: var(--text-muted);
+      flex-wrap: wrap;
+    }
+
+    .detail-controls {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 12px;
+    }
+
+    .detail-controls .streams-actions button {
+      padding: 6px 14px;
     }
 
     .status-pill {
       display: inline-flex;
       align-items: center;
-      gap: 8px;
+      gap: 6px;
       font-family: var(--mono);
       font-size: 12px;
-      padding: 6px 12px;
+      padding: 7px 14px;
       border-radius: 999px;
-      border: 1px solid rgba(16, 185, 129, 0.35);
-      background: rgba(16, 185, 129, 0.18);
-      color: #bef5d2;
+      border: 1px solid var(--accent-strong);
+      background: var(--accent-soft);
+      color: #f1f7ff;
       text-transform: uppercase;
-      letter-spacing: 0.06em;
+      letter-spacing: 0.08em;
+    }
+
+    .status-pill.warn {
+      background: rgba(245, 158, 11, 0.18);
+      border-color: rgba(245, 158, 11, 0.38);
+      color: #fde68a;
+    }
+
+    .status-pill.error {
+      background: rgba(248, 113, 113, 0.18);
+      border-color: rgba(248, 113, 113, 0.38);
+      color: #fecdd3;
     }
 
     .detail-body {
-      padding: 24px 26px;
+      padding: 28px 30px 32px;
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 20px;
+      gap: 22px;
       align-items: start;
       overflow-y: auto;
-      max-height: calc(100vh - 62px - 80px);
+      max-height: calc(100vh - 72px - 110px);
+      background: rgba(11, 14, 20, 0.88);
     }
 
     .panel {
-      background: var(--panel);
-      border: 1px solid var(--border);
-      border-radius: 18px;
+      background: rgba(19, 23, 31, 0.95);
+      border: 1px solid rgba(62,120,178,0.22);
+      border-radius: 20px;
       padding: 22px 24px;
       display: flex;
       flex-direction: column;
-      gap: 18px;
-      box-shadow: 0 14px 34px rgba(6, 12, 24, 0.45);
+      gap: 16px;
+      box-shadow: 0 18px 44px rgba(4, 6, 12, 0.45);
     }
 
     .panel h3 {
       font-size: 15px;
       font-weight: 600;
-      letter-spacing: 0.02em;
+      letter-spacing: 0.08em;
       text-transform: uppercase;
-      color: #c5d8ff;
+      color: #d8e5f5;
     }
 
     .panel dl {
       display: grid;
       grid-template-columns: minmax(120px, 0.4fr) 1fr;
-      row-gap: 10px;
-      column-gap: 12px;
+      row-gap: 12px;
+      column-gap: 14px;
       font-size: 13px;
     }
 
@@ -346,47 +467,47 @@
 
     .panel dd {
       font-family: var(--mono);
-      color: #dce7ff;
+      color: #e5e9ff;
     }
 
     .code-block {
-      background: #080f1f;
-      border: 1px solid rgba(59,130,246,0.22);
-      border-radius: 12px;
-      padding: 12px 0 0 0;
+      background: rgba(14, 18, 26, 0.95);
+      border: 1px solid rgba(62,120,178,0.22);
+      border-radius: 14px;
+      padding: 14px 0 0;
       position: relative;
       overflow: hidden;
     }
 
     .code-block button {
       position: absolute;
-      top: 10px;
-      right: 10px;
-      border: 1px solid rgba(59,130,246,0.35);
-      background: rgba(59,130,246,0.15);
-      color: #dbeafe;
-      padding: 6px 10px;
-      border-radius: 8px;
+      top: 12px;
+      right: 12px;
+      border: 1px solid rgba(62,120,178,0.35);
+      background: rgba(62,120,178,0.18);
+      color: #e0ecff;
+      padding: 6px 12px;
+      border-radius: 10px;
       font-size: 11px;
       cursor: pointer;
     }
 
     .code-block pre {
       margin: 0;
-      padding: 18px 18px 16px;
+      padding: 20px 20px 18px;
       overflow-x: auto;
       font-family: var(--mono);
       font-size: 12px;
       line-height: 1.6;
-      color: #cbd9ff;
+      color: #d4e1f3;
     }
 
-    .code-block .kw { color: #93c5fd; }
+    .code-block .kw { color: #9ac7ff; }
     .code-block .const { color: #f9a8d4; }
     .code-block .str { color: #bef264; }
     .code-block .cmd { color: #facc15; }
     .code-block .flag { color: #fca5a5; }
-    .code-block .comment { color: #94a3b8; }
+    .code-block .comment { color: #8695ad; }
 
     .actions-list {
       display: flex;
@@ -398,30 +519,30 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
-      border: 1px solid rgba(59,130,246,0.25);
-      background: rgba(18,28,45,0.9);
-      padding: 12px 14px;
-      border-radius: 12px;
+      border: 1px solid rgba(62,120,178,0.28);
+      background: rgba(24, 29, 38, 0.82);
+      padding: 12px 16px;
+      border-radius: 14px;
       font-size: 13px;
       cursor: pointer;
-      transition: background 0.15s ease, transform 0.15s ease;
+      transition: background 0.15s ease, transform 0.15s ease, border-color 0.15s ease;
     }
 
     .action-btn:hover {
-      background:rgba(27,39,59,0.95);
+      background: rgba(62,120,178,0.24);
       transform: translateY(-1px);
     }
 
     .action-btn.danger {
-      border-color: rgba(239, 68, 68, 0.45);
-      background: rgba(127, 29, 29, 0.25);
-      color: #fca5a5;
+      border-color: rgba(248,113,113,0.45);
+      background: rgba(127, 29, 29, 0.28);
+      color: #fecaca;
     }
 
     .metrics-grid {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 12px 18px;
+      gap: 14px 22px;
       font-family: var(--mono);
       font-size: 13px;
     }
@@ -430,15 +551,15 @@
       display: block;
       font-size: 11px;
       color: var(--text-muted);
-      letter-spacing: 0.03em;
+      letter-spacing: 0.04em;
       margin-bottom: 4px;
     }
 
     .sparkline-container {
-      height: 50px;
-      background: rgba(59, 130, 246, 0.08);
-      border: 1px solid rgba(59,130,246,0.15);
-      border-radius: 12px;
+      height: 54px;
+      background: rgba(62,120,178,0.12);
+      border: 1px solid rgba(62,120,178,0.22);
+      border-radius: 14px;
       padding: 4px 6px;
     }
 
@@ -451,30 +572,284 @@
     .column-merge {
       grid-column: 1 / -1;
     }
+
+    .streams-view {
+      display: none;
+      flex-direction: column;
+      flex: 1;
+      gap: 24px;
+      background: rgba(11, 14, 20, 0.78);
+      border: 1px solid var(--border);
+      border-radius: 24px;
+      padding: 32px;
+      box-shadow: 0 24px 60px rgba(4, 6, 12, 0.5);
+    }
+
+    .streams-hero {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .streams-hero h2 {
+      font-size: 24px;
+      font-weight: 600;
+      letter-spacing: -0.015em;
+    }
+
+    .streams-hero-headline {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    .streams-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .streams-actions button {
+      border: 1px solid rgba(62,120,178,0.32);
+      background: rgba(62,120,178,0.16);
+      color: #e0ecff;
+      padding: 6px 12px;
+      border-radius: 10px;
+      font-size: 12px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .streams-actions button:hover {
+      background: rgba(62,120,178,0.26);
+    }
+
+    .streams-hero p {
+      font-size: 14px;
+      color: var(--text-muted);
+      max-width: 560px;
+    }
+
+    .streams-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 18px;
+    }
+
+    .stream-card {
+      border: 1px solid rgba(62,120,178,0.24);
+      background: rgba(24, 29, 38, 0.82);
+      border-radius: 20px;
+      padding: 22px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      cursor: pointer;
+      transition: transform 0.18s ease, border-color 0.18s ease, background 0.18s ease;
+      box-shadow: 0 18px 44px rgba(4, 6, 12, 0.45);
+    }
+
+    .stream-card:hover {
+      transform: translateY(-4px);
+      border-color: rgba(0,75,168,0.45);
+      background: rgba(36, 42, 52, 0.92);
+    }
+
+    .stream-card.active {
+      border-color: rgba(0,75,168,0.55);
+      box-shadow: 0 20px 48px rgba(0,75,168,0.28);
+    }
+
+    .stream-card header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+    }
+
+    .stream-card header h3 {
+      font-size: 18px;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+    }
+
+    .stream-meta {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    .stream-meta span {
+      display: block;
+    }
+
+    .stream-card footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    .stream-card footer button {
+      border: 1px solid rgba(62,120,178,0.35);
+      background: rgba(62,120,178,0.22);
+      color: #e0ecff;
+      padding: 6px 12px;
+      border-radius: 10px;
+      font-size: 12px;
+      cursor: pointer;
+    }
+
+    .stream-empty {
+      padding: 40px 24px;
+      border: 1px dashed rgba(62,120,178,0.3);
+      border-radius: 18px;
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 13px;
+    }
+
+    body.view-chat main {
+      justify-content: flex-start;
+      align-items: stretch;
+    }
+
+    body.view-chat .left-pane {
+      width: 100%;
+      max-width: none;
+      flex: 1;
+      border-radius: 28px;
+      border: 1px solid rgba(62,120,178,0.28);
+    }
+
+    body.view-chat .session-list,
+    body.view-chat .sessions {
+      display: none;
+    }
+
+    body.view-chat .chat-log {
+      flex: 1;
+      min-height: 420px;
+      max-height: none;
+      border-radius: 18px;
+    }
+
+    body.view-chat .chat-input {
+      border-radius: 0 0 28px 28px;
+    }
+
+    body.view-chat .detail-pane {
+      display: none;
+    }
+
+    body.view-chat #streamsView {
+      display: none;
+    }
+
+    body.view-streams main {
+      justify-content: center;
+    }
+
+    body.view-streams .left-pane,
+    body.view-streams .detail-pane {
+      display: none;
+    }
+
+    body.view-streams #streamsView {
+      display: flex;
+      max-width: 1100px;
+    }
+
+    body.view-stream-detail #streamsView {
+      display: none;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(4px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    @media (max-width: 1200px) {
+      header {
+        flex-wrap: wrap;
+        height: auto;
+        padding: 16px 24px;
+        gap: 16px;
+      }
+
+      .toolbar {
+        flex-wrap: wrap;
+        justify-content: flex-end;
+      }
+
+      main {
+        flex-direction: column;
+        padding: 24px;
+      }
+
+      .left-pane {
+        width: 100%;
+      }
+
+      .detail-pane {
+        width: 100%;
+      }
+
+      .detail-body {
+        grid-template-columns: 1fr;
+      }
+
+      body.view-streams #streamsView {
+        max-width: none;
+      }
+    }
+
+    @media (max-width: 768px) {
+      .toolbar {
+        width: 100%;
+        justify-content: center;
+      }
+
+      .toolbar button,
+      .toolbar a {
+        flex: 1;
+        justify-content: center;
+      }
+
+      .streams-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .chat-log {
+        max-height: none;
+      }
+    }
   </style>
 </head>
-<body>
+<body class="view-chat">
   <header>
     <div class="brand">
-      <div>
-        <h1>Bond Stream Console</h1>
-        <span style="font-size:13px;color:var(--text-muted);">Developer-first live data governance</span>
-      </div>
+      <h1>3KKO</h1>
     </div>
-    <nav>
+    <div class="toolbar">
+      <button class="nav-link active" id="navChat">Chat</button>
+      <button class="nav-link" id="navStreams">Streams</button>
+      <a class="nav-link" href="https://docs.example.com" target="_blank" rel="noreferrer">Docs</a>
+      <button class="nav-link" id="toolbarSettings">Settings</button>
       <button class="primary" id="toolbarNew">New Stream</button>
-      <button id="toolbarPause">Pause All</button>
-      <button id="toolbarExport">Export Data</button>
-      <a href="https://docs.example.com" target="_blank" rel="noreferrer">Docs</a>
-      <button id="toolbarSettings">Settings</button>
-    </nav>
+    </div>
   </header>
 
   <main>
     <aside class="left-pane">
       <div class="session-list">
-        <h2>Sessions</h2>
-        <button id="sessionNewBtn" style="border:none;background:rgba(59,130,246,0.16);padding:6px 10px;border-radius:8px;color:var(--accent);font-size:12px;cursor:pointer;">New</button>
+        <h2>Streams</h2>
+        <button id="sessionNewBtn">New</button>
       </div>
       <div class="sessions" id="sessionList"></div>
       <div class="chat-log" id="chatLog"></div>
@@ -492,7 +867,13 @@
             <span>No stream loaded</span>
           </div>
         </div>
-        <span class="status-pill" id="streamStatus" style="display:none;">• LIVE</span>
+        <div class="detail-controls">
+          <div class="streams-actions detail-actions">
+            <button data-action="pause-all">Pause All</button>
+            <button data-action="export-all">Export Data</button>
+          </div>
+          <span class="status-pill" id="streamStatus" style="display:none;">• LIVE</span>
+        </div>
       </div>
       <div class="detail-body" id="detailBody">
         <div class="panel column-merge" style="text-align:center;opacity:0.6;">
@@ -502,6 +883,19 @@
           </p>
         </div>
       </div>
+    </section>
+    <section class="streams-view" id="streamsView">
+      <div class="streams-hero">
+        <div class="streams-hero-headline">
+          <h2>Active Streams</h2>
+          <div class="streams-actions">
+            <button data-action="pause-all">Pause All</button>
+            <button data-action="export-all">Export Data</button>
+          </div>
+        </div>
+        <p>Launch new streams from the chat, then jump back in here to inspect performance and metadata.</p>
+      </div>
+      <div class="streams-grid" id="streamsDirectory"></div>
     </section>
   </main>
 
@@ -514,6 +908,15 @@
     const headerSummary = detailHeader.querySelector('.summary');
     const detailBody = document.getElementById('detailBody');
     const streamStatus = document.getElementById('streamStatus');
+    const streamsView = document.getElementById('streamsView');
+    const streamsDirectory = document.getElementById('streamsDirectory');
+    const navChat = document.getElementById('navChat');
+    const navStreams = document.getElementById('navStreams');
+    const root = document.body;
+    const VIEW_CHAT = 'chat';
+    const VIEW_STREAMS = 'streams';
+    const VIEW_DETAIL = 'stream-detail';
+    const viewClasses = ['view-chat', 'view-streams', 'view-stream-detail'];
 
     const activeStreams = new Map();
     let currentStreamId = null;
@@ -521,6 +924,51 @@
 
     function escapeHtml(str = '') {
       return str.replace(/[&<>"]+/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    }
+
+    function setView(nextView) {
+      if (![VIEW_CHAT, VIEW_STREAMS, VIEW_DETAIL].includes(nextView)) {
+        nextView = VIEW_CHAT;
+      }
+      currentView = nextView;
+      root.classList.remove(...viewClasses);
+      root.classList.add(`view-${nextView}`);
+      if (navChat) {
+        navChat.classList.toggle('active', nextView === VIEW_CHAT);
+      }
+      if (navStreams) {
+        navStreams.classList.toggle('active', nextView === VIEW_STREAMS || nextView === VIEW_DETAIL);
+      }
+      if (nextView === VIEW_STREAMS && streamsView) {
+        streamsView.scrollTop = 0;
+      }
+      if (nextView === VIEW_CHAT && messageInput) {
+        messageInput.focus({ preventScroll: true });
+      }
+    }
+
+    if (navChat) {
+      navChat.addEventListener('click', (event) => {
+        event.preventDefault();
+        setView(VIEW_CHAT);
+      });
+    }
+
+    if (navStreams) {
+      navStreams.addEventListener('click', (event) => {
+        event.preventDefault();
+        setView(VIEW_STREAMS);
+        renderStreamsDirectory();
+      });
+    }
+
+    if (streamsDirectory) {
+      streamsDirectory.addEventListener('click', (event) => {
+        const target = event.target.closest('[data-stream]');
+        if (!target) return;
+        event.preventDefault();
+        loadStream(target.dataset.stream);
+      });
     }
 
     function appendMessage(role, html) {
@@ -534,6 +982,35 @@
       chatLog.scrollTop = chatLog.scrollHeight;
       return wrapper.querySelector('.bubble');
     }
+
+    const pauseAllButtons = Array.from(document.querySelectorAll('[data-action="pause-all"]'));
+    const exportAllButtons = Array.from(document.querySelectorAll('[data-action="export-all"]'));
+
+    function setPauseButtonLabels() {
+      pauseAllButtons.forEach(btn => {
+        btn.textContent = pauseAll ? 'Resume All' : 'Pause All';
+      });
+    }
+
+    pauseAllButtons.forEach(btn => {
+      btn.addEventListener('click', () => {
+        pauseAll = !pauseAll;
+        appendMessage('agent', pauseAll ? 'All streams paused (not yet implemented).' : 'Resume streams (not yet implemented).');
+        setPauseButtonLabels();
+      });
+    });
+
+    exportAllButtons.forEach(btn => {
+      btn.addEventListener('click', () => {
+        if (!currentStreamId) {
+          appendMessage('agent', 'Select a stream to export data first.');
+          return;
+        }
+        exportData(currentStreamId, 'csv');
+      });
+    });
+
+    setPauseButtonLabels();
 
     chatForm.addEventListener('submit', async (event) => {
       event.preventDefault();
@@ -574,17 +1051,17 @@
         <div>Here’s the stream I can create:</div>
         <table style="margin-top:12px;border-collapse:collapse;width:100%;font-size:12px;">
           <thead>
-            <tr style="background:rgba(59,130,246,0.18);">
-              <th style="padding:6px 8px;text-align:left;border:1px solid rgba(59,130,246,0.15);">Exchange</th>
-              <th style="padding:6px 8px;text-align:left;border:1px solid rgba(59,130,246,0.15);">Symbols</th>
-              <th style="padding:6px 8px;text-align:left;border:1px solid rgba(59,130,246,0.15);">Fields</th>
+            <tr style="background:rgba(62,120,178,0.18);">
+              <th style="padding:6px 8px;text-align:left;border:1px solid rgba(62,120,178,0.16);">Exchange</th>
+              <th style="padding:6px 8px;text-align:left;border:1px solid rgba(62,120,178,0.16);">Symbols</th>
+              <th style="padding:6px 8px;text-align:left;border:1px solid rgba(62,120,178,0.16);">Fields</th>
             </tr>
           </thead>
           <tbody>${rows || '<tr><td colspan="3" style="padding:8px;color:#f87171;">No CCXT source detected.</td></tr>'}</tbody>
         </table>
         <div style="margin-top:12px;display:flex;gap:10px;">
-          <button id="confirmLaunchBtn" style="border:1px solid rgba(59,130,246,0.35);background:rgba(59,130,246,0.15);color:#dbeafe;padding:8px 12px;border-radius:10px;font-size:12px;cursor:pointer;">Launch</button>
-          <button id="cancelLaunchBtn" style="border:1px solid rgba(148,163,184,0.35);background:rgba(148,163,184,0.12);color:#cbd5f5;padding:8px 12px;border-radius:10px;font-size:12px;cursor:pointer;">Modify</button>
+          <button id="confirmLaunchBtn" style="border:1px solid rgba(0,75,168,0.4);background:rgba(0,75,168,0.22);color:#e0ecff;padding:8px 12px;border-radius:12px;font-size:12px;cursor:pointer;">Launch</button>
+          <button id="cancelLaunchBtn" style="border:1px solid rgba(148,163,184,0.3);background:rgba(148,163,184,0.12);color:#c3cfe4;padding:8px 12px;border-radius:12px;font-size:12px;cursor:pointer;">Modify</button>
         </div>
       `;
 
@@ -598,9 +1075,20 @@
           });
           if (!response.ok) throw new Error(await response.text());
           const stream = await response.json();
-          bubble.innerHTML = `Stream <code>${escapeHtml(stream.stream_id)}</code> started.`;
           addSession(stream.stream_id, stream.ws_url, parsed.spec);
-          loadStream(stream.stream_id);
+          bubble.innerHTML = `
+            Stream <code>${escapeHtml(stream.stream_id)}</code> started.
+            <div style="margin-top:10px;">
+              <a href="#" data-open-stream="${stream.stream_id}" style="color:var(--accent);text-decoration:none;">Open stream workspace →</a>
+            </div>
+          `;
+          const openLink = bubble.querySelector('[data-open-stream]');
+          if (openLink) {
+            openLink.addEventListener('click', (event) => {
+              event.preventDefault();
+              loadStream(stream.stream_id);
+            });
+          }
         } catch (err) {
           bubble.innerHTML = `Failed to launch: ${escapeHtml(err.message)}`;
         }
@@ -699,16 +1187,64 @@
         fragments.push(`
           <div class="session-item ${streamId === currentStreamId ? 'active' : ''}" data-stream="${streamId}">
             <div style="display:flex;justify-content:space-between;align-items:center;">
-              <strong style="font-size:13px;">${escapeHtml((stream.spec.symbols || []).join(', ') || streamId.slice(0, 8))}</strong>
-              <span>${stream.status}</span>
+              <strong style="font-size:13px;color:#f7f9ff;">${escapeHtml((stream.spec.symbols || []).join(', ') || streamId.slice(0, 8))}</strong>
+              <span>${escapeHtml(stream.status)}</span>
             </div>
             <span>ID: ${escapeHtml(streamId)}</span>
             <span>Interval: ${(stream.spec.interval_sec || 1)}s</span>
           </div>
         `);
       }
-      sessionList.innerHTML = fragments.join('') || '<div style="color:var(--text-muted);font-size:12px;">No streams launched yet.</div>';
+      sessionList.innerHTML = fragments.join('') || '<div class="session-empty">No streams launched yet.</div>';
       sessionList.querySelectorAll('[data-stream]').forEach(node => node.addEventListener('click', () => loadStream(node.dataset.stream)));
+      renderStreamsDirectory();
+    }
+
+    function renderStreamsDirectory() {
+      if (!streamsDirectory) return;
+      const cards = [];
+      for (const [streamId, stream] of activeStreams.entries()) {
+        const title = (stream.spec.symbols || []).join(', ') || streamId.slice(0, 8);
+        const interval = stream.spec.interval_sec || 1;
+        let latencyValue = stream.metrics?.mean_latency_ms;
+        const latencyHistory = stream.latencyHistory || [];
+        if (latencyValue == null && latencyHistory.length) {
+          const sum = latencyHistory.reduce((acc, val) => acc + val, 0);
+          latencyValue = sum / latencyHistory.length;
+        }
+        const latency = latencyValue != null ? `${latencyValue.toFixed(1)} ms` : '—';
+        const latestPrice = extractRepresentativePrice(stream.lastEvent);
+        const priceText = typeof latestPrice === 'number'
+          ? `$${latestPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+          : '—';
+        const status = stream.status || 'LIVE';
+        const statusClass = status.toUpperCase().includes('STOP')
+          ? 'status-pill error'
+          : status.toUpperCase().includes('PAUSE')
+            ? 'status-pill warn'
+            : 'status-pill';
+        const eventsPerMinute = stream.metrics?.events_last_minute ?? '—';
+        const isActive = streamId === currentStreamId;
+        cards.push(`
+          <article class="stream-card${isActive ? ' active' : ''}" data-stream="${streamId}">
+            <header>
+              <h3>${escapeHtml(title)}</h3>
+              <span class="${statusClass}">${escapeHtml(status)}</span>
+            </header>
+            <div class="stream-meta">
+              <span>Interval: ${interval}s</span>
+              <span>Latency: ${latency}</span>
+              <span>Events (60s): ${eventsPerMinute}</span>
+              <span>Last price: ${escapeHtml(priceText)}</span>
+            </div>
+            <footer>
+              <span>ID: ${escapeHtml(streamId)}</span>
+              <button type="button">Open workspace</button>
+            </footer>
+          </article>
+        `);
+      }
+      streamsDirectory.innerHTML = cards.join('') || '<div class="stream-empty">No streams launched yet. Use the chat to request one.</div>';
     }
 
     async function pollStreamData(streamId) {
@@ -736,6 +1272,7 @@
             if (entry.latencyHistory.length > 20) entry.latencyHistory.shift();
           }
           if (currentStreamId === streamId) renderStreamDetail(entry);
+          renderSessions();
         }
       } catch (err) {
         console.warn('Metrics fetch failed', err);
@@ -748,6 +1285,7 @@
       const entry = activeStreams.get(streamId);
       if (!entry) return;
       currentStreamId = streamId;
+      setView(VIEW_DETAIL);
       renderSessions();
       renderStreamDetail(entry);
     }
@@ -811,7 +1349,7 @@
         </div>
         <div class="panel">
           <h3>Data Schema</h3>
-          <div style="max-height:220px;overflow:auto;font-family:var(--mono);font-size:12px;border:1px solid rgba(59,130,246,0.15);border-radius:10px;padding:10px;background:rgba(8,13,23,0.95);">
+          <div style="max-height:220px;overflow:auto;font-family:var(--mono);font-size:12px;border:1px solid rgba(62,120,178,0.2);border-radius:12px;padding:12px;background:rgba(19,23,31,0.95);">
             ${Object.entries(schemaToRender || {}).map(([field, meta]) => {
               if (typeof meta === 'string') {
                 return `<div>${escapeHtml(field)}: ${escapeHtml(meta)}</div>`;
@@ -1110,13 +1648,17 @@
           entry.socket.close();
           entry.socket = null;
         }
+        const removedWasCurrent = streamId === currentStreamId;
         activeStreams.delete(streamId);
-        if (streamId === currentStreamId) {
+        if (removedWasCurrent) {
           currentStreamId = null;
           detailBody.innerHTML = '<div class="panel column-merge" style="text-align:center;opacity:0.6;"><h3>Stream stopped</h3><p style="font-size:13px;color:var(--text-muted);">Select another stream or launch a new one.</p></div>';
           streamStatus.style.display = 'none';
         }
         renderSessions();
+        if (removedWasCurrent) {
+          setView(activeStreams.size ? VIEW_STREAMS : VIEW_CHAT);
+        }
       } catch (err) {
         appendMessage('agent', `Failed to stop stream: ${escapeHtml(err.message)}`);
       }
@@ -1139,7 +1681,7 @@
       const minLatency = Math.min(...chartData);
       const span = maxLatency - minLatency || 1;
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.strokeStyle = 'rgba(59,130,246,0.6)';
+      ctx.strokeStyle = 'rgba(0,75,168,0.6)';
       ctx.lineWidth = 2;
       ctx.beginPath();
       chartData.forEach((value, idx) => {
@@ -1159,12 +1701,17 @@
         event.preventDefault();
         pauseAll = !pauseAll;
         appendMessage('agent', pauseAll ? 'All streams paused (not yet implemented).' : 'Resume streams (not yet implemented).');
+        setPauseButtonLabels();
       }
     });
+
+    renderSessions();
+    setView(VIEW_CHAT);
 
     appendMessage('agent', `Bond Agent ready.
     <div style="margin-top:12px;font-size:12px;color:var(--text-muted);">
       Try: “Stream BTC/USDT every 5 seconds.”
+      <br/>Move over to Streams whenever you want to inspect or tweak an active feed.
     </div>`);
   </script>
 </body>
