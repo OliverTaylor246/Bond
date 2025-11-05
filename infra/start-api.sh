@@ -4,7 +4,7 @@ set -e
 SERVICE=${1:-api}
 PORT=${PORT:-8000}
 
-if [ "$SERVICE" = "broker" ]; then
+if [ "$SERVICE" = "Broker" ]; then
   echo "Starting Bond Broker on PORT=${PORT}..."
   exec uvicorn apps.broker.broker:app --host 0.0.0.0 --port ${PORT}
 else
