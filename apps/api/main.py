@@ -159,9 +159,10 @@ async def create_stream(req: CreateStreamRequest):
   # Also generate short-lived token for backwards compatibility with ws_url
   token = generate_token(stream_id, secret, ttl_sec=3600)
 
-  # Build WebSocket URL
+  # Build WebSocket URL (use wss:// for production, ws:// for localhost)
   ws_host = os.getenv("WS_HOST", "localhost:8080")
-  ws_url = f"ws://{ws_host}/ws/{stream_id}?token={token}"
+  ws_protocol = "wss" if "railway.app" in ws_host or "production" in ws_host else "ws"
+  ws_url = f"{ws_protocol}://{ws_host}/ws/{stream_id}?token={token}"
 
   return CreateStreamResponse(
     stream_id=stream_id,
@@ -231,9 +232,10 @@ async def get_stream_token(stream_id: str):
   if not token:
     raise HTTPException(404, "Token not found for this stream")
 
-  # Build WebSocket URL
+  # Build WebSocket URL (use wss:// for production, ws:// for localhost)
   ws_host = os.getenv("WS_HOST", "localhost:8080")
-  ws_url = f"ws://{ws_host}/ws/{stream_id}?token={token.decode() if isinstance(token, bytes) else token}"
+  ws_protocol = "wss" if "railway.app" in ws_host or "production" in ws_host else "ws"
+  ws_url = f"{ws_protocol}://{ws_host}/ws/{stream_id}?token={token.decode() if isinstance(token, bytes) else token}"
 
   return {
     "stream_id": stream_id,
@@ -267,9 +269,10 @@ async def refresh_token(stream_id: str):
   ttl_sec = int(os.getenv("BOND_TOKEN_TTL", "3600"))
   token = generate_token(stream_id, secret, ttl_sec=ttl_sec)
 
-  # Build WebSocket URL
+  # Build WebSocket URL (use wss:// for production, ws:// for localhost)
   ws_host = os.getenv("WS_HOST", "localhost:8080")
-  ws_url = f"ws://{ws_host}/ws/{stream_id}?token={token}"
+  ws_protocol = "wss" if "railway.app" in ws_host or "production" in ws_host else "ws"
+  ws_url = f"{ws_protocol}://{ws_host}/ws/{stream_id}?token={token}"
 
   return TokenResponse(
     token=token,
