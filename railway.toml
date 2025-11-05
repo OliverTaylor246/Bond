@@ -1,9 +1,0 @@
-[build]
-builder = "DOCKERFILE"
-dockerfilePath = "infra/Dockerfile.api"
-
-[deploy]
-startCommand = "bash /start-api.sh"
-healthcheckPath = "/health"
-healthcheckTimeout = 1000
-restartPolicyType = "ON_FAILURE"
