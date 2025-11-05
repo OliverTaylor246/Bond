@@ -1,24 +1,22 @@
 """
-Authentication and token generation for stream access.
+Token utilities for the broker.
 
-SECURITY-CRITICAL: Do not alter without review.
-Uses HMAC-based tokens with expiration for WebSocket authentication.
+The broker validates client tokens before allowing websocket access.
+These helpers mirror the API's HMAC token format so existing clients
+can reuse their credentials.
 """
+from __future__ import annotations
+
 import hashlib
 import hmac
+import os
 import time
-from typing import Optional
 
-
-# Default secret - MUST be overridden in production via environment variable
+# Default secret - override in production with BOND_SECRET
 DEFAULT_SECRET = "bond-dev-secret-change-in-production"
 
 
-def generate_token(
-  stream_id: str,
-  secret: str = DEFAULT_SECRET,
-  ttl_sec: int = 3600
-) -> str:
+def generate_token(stream_id: str, secret: str = DEFAULT_SECRET, ttl_sec: int = 3600) -> str:
   """
   Generate a signed, time-limited access token for a stream.
 
@@ -36,56 +34,33 @@ def generate_token(
   signature = hmac.new(
     secret.encode(),
     message.encode(),
-    hashlib.sha256
-  ).hexdigest()[:16]  # Truncate to 16 chars
+    hashlib.sha256,
+  ).hexdigest()[:16]
 
   return f"{expiry}.{signature}"
 
 
-def verify_token(
-  stream_id: str,
-  token: str,
-  secret: str = DEFAULT_SECRET
-) -> bool:
-  """
-  Verify a stream access token.
-
-  Args:
-    stream_id: Stream identifier
-    token: Token to verify (format: timestamp.signature)
-    secret: HMAC secret key
-
-  Returns:
-    True if token is valid and not expired
-  """
+def verify_token(stream_id: str, token: str, secret: str = DEFAULT_SECRET) -> bool:
+  """Validate a stream access token."""
   try:
     expiry_str, signature = token.split(".", 1)
     expiry = int(expiry_str)
 
-    # Check expiration
     if time.time() > expiry:
       return False
 
-    # Verify signature
     expected_message = f"{stream_id}.{expiry}"
     expected_sig = hmac.new(
       secret.encode(),
       expected_message.encode(),
-      hashlib.sha256
+      hashlib.sha256,
     ).hexdigest()[:16]
 
     return hmac.compare_digest(signature, expected_sig)
-
   except (ValueError, AttributeError):
     return False
 
 
 def get_secret() -> str:
-  """
-  Get the HMAC secret from environment or use default.
-
-  Returns:
-    Secret key string
-  """
-  import os
+  """Read BOND_SECRET from the environment or fall back to the dev default."""
   return os.getenv("BOND_SECRET", DEFAULT_SECRET)

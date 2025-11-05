@@ -15,21 +15,6 @@ services:
       timeout: 3s
       retries: 5
 
-  api:
-    build:
-      context: .
-      dockerfile: infra/Dockerfile.api
-    ports:
-      - "8000:8000"
-    environment:
-      - REDIS_URL=redis://redis:6379
-      - WS_HOST=${RAILWAY_PUBLIC_DOMAIN:-localhost:8080}
-      - BOND_SECRET=${BOND_SECRET}
-      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
-    depends_on:
-      redis:
-        condition: service_healthy
-
   broker:
     build:
       context: .

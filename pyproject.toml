@@ -3,9 +3,9 @@ requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "bond-streams"
+name = "bond-broker"
 version = "0.2.0"
-description = "Real-time market data streaming platform for indie quants and AI agents"
+description = "Lightweight WebSocket broker for Bond event streams"
 readme = "README.md"
 license = {text = "Apache-2.0"}
 authors = [
@@ -15,15 +15,11 @@ maintainers = [
   {name = "Bond Contributors", email = "hello@bondstreams.io"}
 ]
 keywords = [
-  "market-data",
-  "real-time",
-  "streaming",
-  "crypto",
-  "quant",
-  "trading",
+  "broker",
   "websocket",
-  "on-chain",
-  "defi"
+  "redis",
+  "fastapi",
+  "streaming"
 ]
 classifiers = [
   "Development Status :: 4 - Beta",
@@ -42,21 +38,11 @@ requires-python = ">=3.11"
 dependencies = [
   "fastapi>=0.109.0",
   "uvicorn[standard]>=0.27.0",
-  "pydantic>=2.5.3",
-  "ccxt>=4.2.25",
-  "websockets>=12.0",
   "redis[hiredis]>=5.0.1",
-  "httpx>=0.26.0",
-  "grpcio>=1.60.0",
-  "grpcio-tools>=1.60.0",
-  "protobuf>=4.25.1",
-  "orjson>=3.9.12",
 ]
 
 [project.optional-dependencies]
 dev = [
-  "pytest>=7.4.4",
-  "pytest-asyncio>=0.23.3",
   "mypy>=1.8.0",
   "flake8>=7.0.0",
   "black>=24.0.0",
@@ -68,17 +54,6 @@ Documentation = "https://github.com/OliverTaylor246/Bond#readme"
 Repository = "https://github.com/OliverTaylor246/Bond.git"
 Issues = "https://github.com/OliverTaylor246/Bond/issues"
 Changelog = "https://github.com/OliverTaylor246/Bond/blob/main/CHANGELOG.md"
-
-[tool.setuptools.packages.find]
-where = ["sdk/python"]
-include = ["bond*"]
-
-[tool.pytest.ini_options]
-asyncio_mode = "auto"
-testpaths = ["tests"]
-python_files = ["test_*.py"]
-python_classes = ["Test*"]
-python_functions = ["test_*"]
 
 [tool.mypy]
 python_version = "3.11"

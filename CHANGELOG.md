@@ -5,6 +5,14 @@ All notable changes to Bond will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- Trimmed repository to broker-only service: removed API, compiler, connectors, SDK, examples, and tests.
+- Migrated token utilities to `apps.broker.auth` to decouple from the API package.
+- Simplified Dockerfile, dependencies, and Makefile for broker-focused workflows.
+- Updated documentation to reflect the broker-only scope.
+
 ## [0.2.0] - 2025-10-21
 
 ### Added - Indie Quant + On-Chain gRPC MVP

@@ -1,1 +1,1 @@
-"""Apps module - API, broker, compiler, runtime."""
+"""Application packages for the Bond broker."""

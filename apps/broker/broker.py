@@ -11,7 +11,7 @@ from contextlib import asynccontextmanager
 from typing import Optional
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query
 from engine.dispatch import RedisDispatcher
-from apps.api.crypto import verify_token, get_secret
+from apps.broker.auth import verify_token, get_secret
 
 
 # Global dispatcher
