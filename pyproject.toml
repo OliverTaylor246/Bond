@@ -3,16 +3,16 @@ requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "bond-streams"
+name = "ekko"
 version = "0.2.0"
-description = "Real-time market data streaming platform for indie quants and AI agents"
+description = "Echo real-time market data streaming SDK for AI agents and quants"
 readme = "README.md"
 license = {text = "Apache-2.0"}
 authors = [
-  {name = "Bond Contributors", email = "hello@bondstreams.io"}
+  {name = "Echo Contributors", email = "hello@ekko.dev"}
 ]
 maintainers = [
-  {name = "Bond Contributors", email = "hello@bondstreams.io"}
+  {name = "Echo Contributors", email = "hello@ekko.dev"}
 ]
 keywords = [
   "market-data",
@@ -23,7 +23,9 @@ keywords = [
   "trading",
   "websocket",
   "on-chain",
-  "defi"
+  "defi",
+  "echo",
+  "ekko"
 ]
 classifiers = [
   "Development Status :: 4 - Beta",
@@ -63,15 +65,15 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/OliverTaylor246/Bond"
-Documentation = "https://github.com/OliverTaylor246/Bond#readme"
-Repository = "https://github.com/OliverTaylor246/Bond.git"
-Issues = "https://github.com/OliverTaylor246/Bond/issues"
-Changelog = "https://github.com/OliverTaylor246/Bond/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/OliverTaylor246/Ekko"
+Documentation = "https://github.com/OliverTaylor246/Ekko#readme"
+Repository = "https://github.com/OliverTaylor246/Ekko.git"
+Issues = "https://github.com/OliverTaylor246/Ekko/issues"
+Changelog = "https://github.com/OliverTaylor246/Ekko/blob/main/CHANGELOG.md"
 
 [tool.setuptools.packages.find]
 where = ["sdk/python"]
-include = ["bond*"]
+include = ["ekko*"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

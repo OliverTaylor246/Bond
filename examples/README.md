@@ -1,12 +1,12 @@
-# Bond Examples
+# Ekko Examples
 
-This directory contains example scripts and usage patterns for Bond.
+This directory contains example scripts and usage patterns for Ekko.
 
 ## Quick Start
 
 ### 1. Platform Test Script
 
-Test that Bond is running correctly:
+Test that Echo is running correctly:
 
 ```bash
 ./test_platform.sh
@@ -22,7 +22,7 @@ This script:
 
 ### 2. Simple Python Client
 
-Example of using the Bond Python SDK:
+Example of using the Ekko Python SDK:
 
 ```bash
 python simple_client.py
@@ -33,14 +33,14 @@ This demonstrates:
 - Connecting to WebSocket
 - Receiving real-time events
 
-**Requirements**: Bond SDK installed (`pip install -e ../sdk/python`)
+**Requirements**: Ekko SDK installed (`pip install -e ../sdk/python`)
 
 ## Usage Patterns
 
 ### Pattern 1: One-liner Stream
 
 ```python
-from bond import listen
+from ekko import listen
 
 async for event in listen("BTC price every 5s"):
   print(event["price_avg"])
@@ -49,9 +49,9 @@ async for event in listen("BTC price every 5s"):
 ### Pattern 2: Client Object
 
 ```python
-from bond import BondClient
+from ekko import EkkoClient
 
-client = BondClient(api_url="http://localhost:8000")
+client = EkkoClient(api_url="http://localhost:8000")
 
 # Create stream
 result = await client.create_stream("BTC + ETH prices every 3s")
@@ -65,7 +65,7 @@ async for event in client.listen("BTC + ETH prices every 3s"):
 ### Pattern 3: With Callback
 
 ```python
-from bond import listen
+from ekko import listen
 
 def handle_event(event):
   if event["price_avg"]:
@@ -79,7 +79,7 @@ async for event in listen("BTC price every 5s", callback=handle_event):
 
 ```python
 import asyncio
-from bond import listen
+from ekko import listen
 
 async def watch_btc():
   async for event in listen("BTC price every 5s"):

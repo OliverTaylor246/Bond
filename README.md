@@ -9,7 +9,7 @@
 
 Bond lets you spin up custom real-time market data streams on demand. Describe what you want in natural language (e.g., "BTC price + on-chain activity + tweets every 5s"), and get back a live WebSocket feed with aggregated, time-aligned data.
 
-> **Note**: This repository contains the Bond SDK, examples, and local development tools. Production-grade connectors, hosted runtime with SLAs, and enterprise features are available through [Bond Cloud](#bond-cloud-hosted-service) (contact for access).
+> **Note**: This repository contains the Ekko SDK, examples, and local development tools. Production-grade connectors, hosted runtime with SLAs, and enterprise features are available through [Echo Cloud](#echo-cloud-hosted-service) (contact for access).
 
 ## Features
 
@@ -59,9 +59,9 @@ Using `wscat`:
 wscat -c "ws://localhost:8080/ws/8f2a1c9d4b3e7a10?token=..."
 ```
 
-Or using the Python SDK:
+Or using the Ekko Python SDK:
 ```python
-from bond import listen
+from ekko import listen
 
 async for event in listen("BTC price + tweets every 5s"):
   print(f"Price: {event['price_avg']}, Tweets: {event['tweets']}")
@@ -135,7 +135,7 @@ bond/
 │   └── dispatch.py       # Redis Streams publisher/consumer
 │
 ├── sdk/
-│   └── python/bond/
+│   └── python/ekko/
 │       └── client.py     # Python SDK
 │
 ├── infra/
@@ -159,18 +159,16 @@ pip install -e sdk/python
 ### Usage
 
 ```python
-from bond import BondClient
+from ekko import EkkoClient, listen
 
 # Create client
-client = BondClient(api_url="http://localhost:8000")
+client = EkkoClient(api_url="http://localhost:8000")
 
 # Create and listen to a stream
 async for event in client.listen("BTC price + liquidations every 3s"):
   print(event)
 
 # Or use the convenience function
-from bond import listen
-
 async for event in listen("ETH trades + tweets every 10s"):
   if event["price_avg"]:
     print(f"ETH: ${event['price_avg']:.2f}")
@@ -438,9 +436,9 @@ make down
 
 See [CLAUDE.md](CLAUDE.md) for architecture details and AI agent guidelines.
 
-## Bond Cloud (Hosted Service)
+## Echo Cloud (Hosted Service)
 
-Bond Cloud provides production-grade infrastructure for running Bond streams at scale:
+Echo Cloud provides production-grade infrastructure for running Echo streams at scale:
 
 - **Production connectors**: Real-time WebSocket feeds (ccxt.pro), authenticated Twitter streams, verified on-chain gRPC
 - **Enterprise SLAs**: 99.9% uptime, guaranteed latency targets, 24/7 monitoring
@@ -448,20 +446,20 @@ Bond Cloud provides production-grade infrastructure for running Bond streams at 
 - **Advanced features**: Multi-region deployment, custom transforms, historical replay (24h+), ML model serving
 - **Support**: Priority support, custom connector development, integration assistance
 
-**Interested in Bond Cloud?** Contact us for pilot access or enterprise pricing.
+**Interested in Echo Cloud?** Contact us for pilot access or enterprise pricing.
 
 ## Compliance & Usage Notes
 
-**Important:** Users of Bond must comply with the Terms of Service of all data sources they connect to:
+**Important:** Users of Echo must comply with the Terms of Service of all data sources they connect to:
 
 - **CCXT exchanges**: Respect rate limits and usage policies of Binance, OKX, Bybit, etc.
 - **Twitter/X API**: Requires valid API credentials and adherence to Twitter's Terms of Service
 - **On-chain data**: Yellowstone Geyser usage subject to provider's terms
 
-**Redistribution Advisory:** Bond is designed for personal/internal use by indie quants and researchers. Redistribution of raw market data streams may violate data provider agreements. Users are responsible for ensuring their usage complies with all applicable terms and regulations.
+**Redistribution Advisory:** Echo is designed for personal/internal use by indie quants and researchers. Redistribution of raw market data streams may violate data provider agreements. Users are responsible for ensuring their usage complies with all applicable terms and regulations.
 
 ## License
 
 Apache License 2.0 - See [LICENSE](LICENSE) file for details.
 
-Copyright 2024-2025 Bond Contributors
+Copyright 2024-2025 Echo Contributors

@@ -92,7 +92,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Deterministic stream ID generation (Blake2b hashing)
 
 #### Python SDK
-- `BondClient` for stream creation and management
+- `EkkoClient` for stream creation and management
 - `listen()` helper for simple consumption
 - Async iterator pattern for event streaming
 

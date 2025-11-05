@@ -1,15 +1,14 @@
 """
-Bond Python SDK - simple client for creating and consuming streams.
+Ekko Python SDK - simple client for creating and consuming streams.
 """
-import asyncio
 import json
 from typing import Any, AsyncIterator, Callable
 import httpx
 import websockets
 
 
-class BondClient:
-  """Client for interacting with bond API and streams."""
+class EkkoClient:
+  """Client for interacting with Echo API and streams."""
 
   def __init__(
     self,
@@ -33,7 +32,7 @@ class BondClient:
       Dict with stream_id, ws_url, and spec
 
     Example:
-      >>> client = BondClient()
+      >>> client = EkkoClient()
       >>> result = await client.create_stream("BTC price + tweets every 5s")
       >>> print(result["stream_id"])
     """
@@ -128,10 +127,10 @@ async def listen(
     Event dictionaries
 
   Example:
-    >>> from bond import listen
+    >>> from ekko import listen
     >>> async for event in listen("BTC + ETH prices every 3s"):
     ...   print(event)
   """
-  client = BondClient(api_url)
+  client = EkkoClient(api_url)
   async for event in client.listen(spec, callback):
     yield event

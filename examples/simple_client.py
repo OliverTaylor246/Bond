@@ -1,5 +1,5 @@
 """
-Simple example of using the Bond SDK.
+Simple example of using the Ekko SDK.
 
 Usage:
   python examples/simple_client.py
@@ -8,10 +8,11 @@ import asyncio
 import sys
 import os
 
-# Add parent directory to path for imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+# Add SDK path for local development imports
+repo_root = os.path.join(os.path.dirname(__file__), "..")
+sys.path.insert(0, os.path.join(repo_root, "sdk", "python"))
 
-from sdk.python.bond import listen
+from ekko import listen
 
 
 async def main():

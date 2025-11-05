@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Bond Terminal · Stream Console</title>
+  <title>Echo Terminal · Stream Console</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -854,7 +854,7 @@
       <div class="sessions" id="sessionList"></div>
       <div class="chat-log" id="chatLog"></div>
       <form class="chat-input" id="chatForm">
-        <textarea id="messageInput" placeholder="Ask Bond Agent to create or modify streams…" rows="4"></textarea>
+        <textarea id="messageInput" placeholder="Ask Echo Agent to create or modify streams…" rows="4"></textarea>
         <button type="submit">Submit</button>
       </form>
     </aside>
@@ -879,7 +879,7 @@
         <div class="panel column-merge" style="text-align:center;opacity:0.6;">
           <h3 style="margin-bottom:10px;">Awaiting Selection</h3>
           <p style="font-size:13px;color:var(--text-muted);">
-            Use Bond Agent to launch a stream or select one from the Sessions list to inspect its metadata, schema, integrations, and performance metrics.
+            Use Echo Agent to launch a stream or select one from the Sessions list to inspect its metadata, schema, integrations, and performance metrics.
           </p>
         </div>
       </div>
@@ -1409,7 +1409,7 @@
         </div>
       `;
 
-      const pythonSnippet = `from bond import listen\n\nasync def main():\n    async for event in listen("${stream.streamId}"):\n        print(event)`;
+      const pythonSnippet = `from ekko import listen\n\nasync def main():\n    async for event in listen("${stream.streamId}"):\n        print(event)`;
       const wsActual = stream.wsUrl.replace('localhost', window.location.hostname);
       const wsDisplay = wsActual.replace(/token=.*$/i, 'token=***');
       const curlSnippet = `curl -X GET "https://api.bond.dev/v1/streams/${stream.streamId}" \\\n     -H "Authorization: Bearer <token>"`;
@@ -1708,7 +1708,7 @@
     renderSessions();
     setView(VIEW_CHAT);
 
-    appendMessage('agent', `Bond Agent ready.
+    appendMessage('agent', `Echo Agent ready.
     <div style="margin-top:12px;font-size:12px;color:var(--text-muted);">
       Try: “Stream BTC/USDT every 5 seconds.”
       <br/>Move over to Streams whenever you want to inspect or tweak an active feed.
