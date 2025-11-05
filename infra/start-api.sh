@@ -1,4 +1,5 @@
 #!/bin/bash
+echo "Starting Bond API on PORT=${PORT}"
 set -e
 
 echo "Installing Playwright browsers at runtime..."
