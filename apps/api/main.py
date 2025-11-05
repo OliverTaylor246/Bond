@@ -308,6 +308,42 @@ async def get_stream_metrics(stream_id: str):
   return metrics.to_dict()
 
 
+@app.get("/v1/streams/{stream_id}/schema")
+async def get_stream_schema(stream_id: str):
+  """Get schema for a stream."""
+  if not runtime:
+    raise HTTPException(500, "Runtime not initialized")
+
+  if not runtime.is_running(stream_id):
+    raise HTTPException(404, f"Stream {stream_id} not found")
+
+  # Return basic schema
+  return {
+    "stream_id": stream_id,
+    "fields": [
+      {"name": "ts", "type": "string"},
+      {"name": "window_start", "type": "string"},
+      {"name": "window_end", "type": "string"},
+      {"name": "price_avg", "type": "float"},
+      {"name": "volume_sum", "type": "float"},
+      {"name": "raw_data", "type": "object"}
+    ]
+  }
+
+
+@app.get("/v1/streams/{stream_id}/spec")
+async def get_stream_spec(stream_id: str):
+  """Get stream specification."""
+  if not runtime:
+    raise HTTPException(500, "Runtime not initialized")
+
+  if not runtime.is_running(stream_id):
+    raise HTTPException(404, f"Stream {stream_id} not found")
+
+  # Return empty spec for now
+  return {"stream_id": stream_id, "spec": {}}
+
+
 class NLParseRequest(BaseModel):
   """Request to parse natural language into stream config."""
   query: str
