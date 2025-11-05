@@ -7,7 +7,7 @@ from typing import Dict, Any
 AVAILABLE_OPTIONS = {
     "symbols": "any cryptocurrency symbol (e.g., BTC, ETH, SOL, AVAX, MATIC, LINK, UNI, DOGE, ADA, DOT, AAVE, CRV, SUSHI, COMP, MKR, YFI, SNX, etc.)",
     "popular_symbols": ["BTC", "ETH", "SOL"],  # Limited to top 3 - broker can't handle more concurrent WebSocket streams
-    "exchanges": ["kraken", "kucoin"],
+    "exchanges": ["binanceus", "binance"],
     "fields": ["price", "bid", "ask", "high", "low", "open", "close", "volume"],
     "sources": ["twitter", "onchain", "liquidations", "google_trends", "nitter"],
     "twitter_users": ["elonmusk", "vitalikbuterin", "cz_binance", "SBF_FTX", "APompliano"],
@@ -28,8 +28,8 @@ async def parse_stream_request(user_input: str, api_key: str) -> Dict[str, Any]:
         Input: "show me live btc prices"
         Output: {
             "symbols": ["BTC"],
-            "exchanges": [{"exchange": "kraken", "fields": ["price", "volume"]},
-                         {"exchange": "kucoin", "fields": ["price", "volume"]}],
+            "exchanges": [{"exchange": "binanceus", "fields": ["price", "volume"]},
+                         {"exchange": "binance", "fields": ["price", "volume"]}],
             "interval_sec": 1.0,
             "reasoning": "User wants live Bitcoin prices, using all exchanges with default fields"
         }
@@ -51,7 +51,7 @@ Return ONLY a JSON object with this structure:
 {{
   "symbols": ["BTC"],
   "exchanges": [
-    {{"exchange": "kraken", "fields": ["price", "volume"]}}
+    {{"exchange": "binanceus", "fields": ["price", "volume"]}}
   ],
   "additional_sources": [],
   "interval_sec": 1.0,

@@ -12,7 +12,7 @@ import ccxt.pro as ccxtpro
 from engine.schemas import TradeEvent
 
 
-EXCHANGES = ["binance", "binanceus", "kraken", "kucoin"]
+EXCHANGES = ["binanceus", "binance"]
 
 INTERVAL_TO_TIMEFRAME = {
   1: "1s",
@@ -55,6 +55,28 @@ def normalize_market_type(market_type: Optional[str]) -> Optional[str]:
   return mapping.get(mt, mt)
 
 
+def _allowed_market_types(market_type: Optional[str]) -> set[str]:
+  """
+  Return the set of market types to allow when filtering markets.
+
+  Args:
+    market_type: Requested market type (spot, futures, swap, etc.)
+
+  Returns:
+    Set of allowed market types for filtering
+  """
+  normalized = normalize_market_type(market_type)
+  if not normalized:
+    return {"spot"}  # Default to spot if not specified
+
+  if normalized == "future":
+    return {"future", "swap"}  # Futures can include perpetuals
+  elif normalized == "swap":
+    return {"swap"}  # Perpetuals only
+  else:
+    return {normalized}
+
+
 def build_stream_params(market_type: Optional[str]) -> dict[str, Any]:
   normalized = normalize_market_type(market_type)
   if normalized in {"future", "swap", "margin"}:
@@ -82,6 +104,92 @@ def create_rest_client(exchange: str, market_type: Optional[str] = None):
     params["options"] = {"defaultType": normalized}
 
   return exchange_class(params)
+
+
+def resolve_symbol_map(
+  exchanges: list[str],
+  requested_symbols: list[str],
+  market_type: Optional[str] = None,
+) -> dict[str, list[str]]:
+  """
+  Map requested symbols to exchange-specific symbols based on availability.
+
+  For each exchange, finds the best matching symbol format. For example:
+  - BTC/USDT might map to BTC/USDT on Binance
+  - BTC/USDT might map to BTC/USD on Kraken for spot
+  - BTC/USDT might map to BTC/USDT:USDT on Binance for perpetuals
+
+  Args:
+    exchanges: List of exchange names to check
+    requested_symbols: List of symbols in standard format (e.g., ["BTC/USDT"])
+    market_type: Market type filter (spot, futures, swap, etc.)
+
+  Returns:
+    Dict mapping exchange name to list of resolved symbols
+  """
+  result: dict[str, list[str]] = {}
+  allowed_types = _allowed_market_types(market_type)
+
+  for exchange_name in exchanges:
+    try:
+      ex = create_rest_client(exchange_name, market_type)
+      markets = ex.load_markets()
+
+      resolved: list[str] = []
+      for req_symbol in requested_symbols:
+        base_quote = req_symbol.split("/")
+        if len(base_quote) != 2:
+          continue
+
+        base, quote = base_quote[0], base_quote[1]
+
+        # Try exact match first
+        if req_symbol in markets:
+          market_info = markets[req_symbol]
+          if market_info.get("type") in allowed_types:
+            resolved.append(req_symbol)
+            continue
+
+        # Try common variations
+        candidates = [
+          f"{base}/{quote}",
+          f"{base}/USD",
+          f"{base}/USDC",
+          f"{base}/{quote}:USDT",  # Perpetuals format
+          f"{base}/{quote}:{quote}",  # Alternative perpetuals
+        ]
+
+        found = False
+        for candidate in candidates:
+          if candidate in markets:
+            market_info = markets[candidate]
+            if market_info.get("type") in allowed_types:
+              resolved.append(candidate)
+              found = True
+              break
+
+        if not found:
+          print(
+            f"[ccxt_ws] Symbol {req_symbol} not available on {exchange_name} "
+            f"for market_type={market_type}",
+            flush=True,
+          )
+
+      if resolved:
+        result[exchange_name] = resolved
+        print(
+          f"[ccxt_ws] Resolved {exchange_name}: {requested_symbols} -> {resolved}",
+          flush=True,
+        )
+
+      close_fn = getattr(ex, "close", None)
+      if callable(close_fn):
+        close_fn()
+
+    except Exception as err:
+      print(f"[ccxt_ws] Failed to resolve symbols for {exchange_name}: {err}", flush=True)
+
+  return result
 
 
 def interval_to_timeframe(interval_sec: float | int | None) -> Optional[str]:

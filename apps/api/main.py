@@ -50,6 +50,7 @@ class CreateStreamRequest(BaseModel):
 class CreateStreamResponse(BaseModel):
   """Response with stream details."""
   stream_id: str
+  access_token: str
   ws_url: str
   spec: dict[str, Any]
 
@@ -148,8 +149,14 @@ async def create_stream(req: CreateStreamRequest):
     # Create metrics tracker
     metrics_registry.create(stream_id)
 
-  # Generate access token
+  # Generate persistent access token (10 years TTL)
   secret = get_secret()
+  persistent_token = generate_token(stream_id, secret, ttl_sec=315360000)  # ~10 years
+
+  # Store persistent token in Redis
+  await runtime.dispatcher.client.set(f"stream:{stream_id}:token", persistent_token)
+
+  # Also generate short-lived token for backwards compatibility with ws_url
   token = generate_token(stream_id, secret, ttl_sec=3600)
 
   # Build WebSocket URL
@@ -158,6 +165,7 @@ async def create_stream(req: CreateStreamRequest):
 
   return CreateStreamResponse(
     stream_id=stream_id,
+    access_token=persistent_token,
     ws_url=ws_url,
     spec=spec.model_dump(),
   )
@@ -206,6 +214,32 @@ async def get_stream(stream_id: str):
     raise HTTPException(404, f"Stream {stream_id} not found")
 
   return StreamInfo(stream_id=stream_id, running=running)
+
+
+@app.get("/v1/streams/{stream_id}/token")
+async def get_stream_token(stream_id: str):
+  """Get the persistent access token for a stream."""
+  if not runtime:
+    raise HTTPException(500, "Runtime not initialized")
+
+  if not runtime.is_running(stream_id):
+    raise HTTPException(404, f"Stream {stream_id} not found")
+
+  # Retrieve persistent token from Redis
+  token = await runtime.dispatcher.client.get(f"stream:{stream_id}:token")
+
+  if not token:
+    raise HTTPException(404, "Token not found for this stream")
+
+  # Build WebSocket URL
+  ws_host = os.getenv("WS_HOST", "localhost:8080")
+  ws_url = f"ws://{ws_host}/ws/{stream_id}?token={token.decode() if isinstance(token, bytes) else token}"
+
+  return {
+    "stream_id": stream_id,
+    "access_token": token.decode() if isinstance(token, bytes) else token,
+    "ws_url": ws_url,
+  }
 
 
 class TokenResponse(BaseModel):

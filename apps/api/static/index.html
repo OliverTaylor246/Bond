@@ -633,7 +633,7 @@
           if (!response.ok) throw new Error(await response.text());
           const stream = await response.json();
           bubble.innerHTML = `Stream <code>${escapeHtml(stream.stream_id)}</code> started.`;
-          addSession(stream.stream_id, stream.ws_url, parsed.spec);
+          addSession(stream.stream_id, stream.ws_url, parsed.spec, stream.access_token);
           loadStream(stream.stream_id);
         } catch (err) {
           bubble.innerHTML = `Failed to launch: ${escapeHtml(err.message)}`;
@@ -645,11 +645,12 @@
       });
     }
 
-    function addSession(streamId, wsUrl, spec) {
+    function addSession(streamId, wsUrl, spec, accessToken) {
       activeStreams.set(streamId, {
         streamId,
         wsUrl,
         spec,
+        accessToken,
         metrics: null,
         schema: null,
         derivedSchema: null,
@@ -840,6 +841,7 @@
           <h3>Stream Metadata</h3>
           <dl>
             <dt>Stream ID</dt><dd>${escapeHtml(stream.streamId)}</dd>
+            ${stream.accessToken ? `<dt>Access Token</dt><dd style="font-family:var(--mono);font-size:11px;word-break:break-all;">${escapeHtml(stream.accessToken)}</dd>` : ''}
             <dt>Status</dt><dd>${escapeHtml(stream.status)}</dd>
             <dt>Interval</dt><dd>${interval}s</dd>
             <dt>Latency</dt><dd>${latency}</dd>
