@@ -6,4 +6,4 @@ echo "Installing Playwright browsers at runtime..."
 python -m playwright install --with-deps chromium
 
 echo "Starting API server..."
-exec uvicorn apps.broker.broker:app --host 0.0.0.0 --port ${PORT}
+exec uvicorn apps.broker.broker:app --host 0.0.0.0 --port 8080
