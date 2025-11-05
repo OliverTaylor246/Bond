@@ -1,9 +1,9 @@
 [build]
 builder = "DOCKERFILE"
-dockerfilePath = "infra/Dockerfile.api"
+dockerfilePath = "infra/Dockerfile.broker"
 
 [deploy]
-startCommand = "bash /start-api.sh"
+startCommand = "bash /start-api.sh broker"
 healthcheckPath = "/health"
 healthcheckTimeout = 1000
 restartPolicyType = "ON_FAILURE"
