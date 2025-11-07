@@ -1,8 +1,13 @@
-"""Natural language parser for stream configuration using DeepSeek LLM."""
+"""Natural language parser for stream configuration using LangChain + DeepSeek."""
+
+from __future__ import annotations
 
 import json
-import httpx
-from typing import Dict, Any
+from typing import Any, Dict
+
+from langchain_core.output_parsers import JsonOutputParser
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_openai import ChatOpenAI
 
 AVAILABLE_OPTIONS = {
     "symbols": "any cryptocurrency symbol (e.g., BTC, ETH, SOL, AVAX, MATIC, LINK, UNI, DOGE, ADA, DOT, AAVE, CRV, SUSHI, COMP, MKR, YFI, SNX, etc.)",
@@ -19,106 +24,114 @@ AVAILABLE_OPTIONS = {
     }
 }
 
+_FORMATTER = JsonOutputParser()
 
-async def parse_stream_request(user_input: str, api_key: str) -> Dict[str, Any]:
-    """
-    Parse natural language into stream configuration using DeepSeek.
-
-    Example:
-        Input: "show me live btc prices"
-        Output: {
-            "symbols": ["BTC"],
-            "exchanges": [{"exchange": "binanceus", "fields": ["price", "volume"]},
-                         {"exchange": "binance", "fields": ["price", "volume"]}],
-            "interval_sec": 1.0,
-            "reasoning": "User wants live Bitcoin prices, using all exchanges with default fields"
-        }
-    """
-
-    prompt = f"""You are a financial data stream configuration assistant. Parse the user's request into a structured stream configuration.
+_PROMPT = ChatPromptTemplate.from_messages([
+    (
+        "system",
+        """You are a financial data stream configuration assistant that maps user goals \
+into a structured JSON object. Use only the provided catalog of options.
 
 Available options:
-- Symbols: {AVAILABLE_OPTIONS['symbols']}
+{available_options}
+
+Existing stream spec context (use as baseline when provided):
+{current_context}
+
+Output schema (all keys required):
+{{
+  "symbols": ["BTC", "ETH"],
+  "exchanges": [
+    {{"exchange": "binanceus", "fields": ["price", "volume", "high", "low"]}}
+  ],
+  "additional_sources": [
+    "twitter",
+    "google_trends",
+    {{"type": "nitter", "username": "elonmusk", "interval_sec": 1.0}}
+  ],
+  "interval_sec": 1.0,
+  "reasoning": "short natural language explanation"
+}}
+
+Rules:
+{rules}
+
+Return ONLY JSON in that schema. Never rename keys. Never omit interval_sec.
+
+Output requirements:
+{format_instructions}
+""",
+    ),
+    (
+        "human",
+        "{user_request}",
+    ),
+])
+
+_RULES = """1. Use any cryptocurrency ticker the user mentions (convert names to uppercase symbols).
+2. "All crypto" style requests should map to the popular symbols list.
+3. Binance US is the default exchange and ["price", "volume"] the default fields unless specified.
+4. Interpret refresh hints: "realtime"/"fastest" -> 0.1, "live"/"right now"/"current" -> 1 second.
+5. Mentioning "twitter"/"social" adds twitter source; "search interest"/"trends" adds google_trends.
+6. Detect all crypto names mentioned (bitcoin -> BTC, ethereum -> ETH, etc.).
+7. Single-asset asks should include price, volume, high, low fields.
+8. Handle "fastest refresh rate"/"fastest possible" as 0.1 seconds.
+9. If tweets or @handles are requested, add a nitter source with the username.
+10. Default Twitter handles: elonmusk, vitalikbuterin, cz_binance.
+11. If user only wants tweets/social data, leave symbols/exchanges empty and only return the relevant sources.
+12. Always return compliant JSON with keys: symbols, exchanges, additional_sources, interval_sec, reasoning.
+13. When an existing stream spec is provided, start from it and only change the parts the user requested—preserve other symbols, sources, and intervals.
+14. Treat additive requests ("add tweets", "include Google Trends") as augmentations unless the user explicitly asks to replace or remove sources.
+"""
+
+_AVAILABLE_OPTIONS_TEXT = f"""- Symbols: {AVAILABLE_OPTIONS['symbols']}
 - Popular symbols: {', '.join(AVAILABLE_OPTIONS['popular_symbols'])}
 - Exchanges: {', '.join(AVAILABLE_OPTIONS['exchanges'])}
 - Fields: {', '.join(AVAILABLE_OPTIONS['fields'])}
 - Additional sources: {', '.join(AVAILABLE_OPTIONS['sources'])}
-- Twitter users for Nitter: {', '.join(AVAILABLE_OPTIONS['twitter_users'])}
+- Twitter users: {', '.join(AVAILABLE_OPTIONS['twitter_users'])}
+- Interval presets: {', '.join(f"{k}={v}s" for k, v in AVAILABLE_OPTIONS['intervals'].items())}"""
 
-User request: "{user_input}"
 
-Return ONLY a JSON object with this structure:
-{{
-  "symbols": ["BTC"],
-  "exchanges": [
-    {{"exchange": "binanceus", "fields": ["price", "volume"]}}
-  ],
-  "additional_sources": [],
-  "interval_sec": 1.0,
-  "reasoning": "Brief explanation of choices"
-}}
+def _format_current_spec(spec: Dict[str, Any] | None) -> str:
+    if not spec:
+        return "None provided. Start from a blank configuration."
+    try:
+        return json.dumps(spec, indent=2)
+    except (TypeError, ValueError):
+        return str(spec)
 
-Rules:
-1. You can use ANY cryptocurrency symbol (BTC, ETH, LINK, AAVE, CRV, etc.) - not limited to the popular list
-2. If user says "all crypto" or "all cryptocurrencies" or "all available" -> use the popular symbols list: {', '.join(AVAILABLE_OPTIONS['popular_symbols'])}
-3. If user doesn't specify exchange, use Binance US
-4. If user doesn't specify fields, use ["price", "volume"] as defaults
-5. If user says "realtime" or "fast" or "fastest", use interval 0.1
-6. If user says "live", "right now", "current" -> use 1 second interval
-7. If user mentions "twitter" or "social", add twitter source
-8. If user mentions "search interest" or "trends", add google_trends source
-9. Extract ALL mentioned cryptocurrencies (bitcoin=BTC, ethereum=ETH, chainlink=LINK, etc.)
-10. Be generous - if user says "show me bitcoin", include price, volume, high, low
-11. "fastest refresh rate" or "fastest possible" means interval 0.1 seconds
-12. Convert all cryptocurrency names to uppercase ticker symbols (e.g., "bitcoin" -> "BTC", "ethereum" -> "ETH")
-13. If user mentions "tweets" OR specific Twitter usernames (elonmusk, vitalik, etc.) OR "@username" -> add nitter source with username
-14. For Nitter sources, format as: {{"type": "nitter", "username": "elonmusk", "interval_sec": X}}
-15. Default Twitter users: elonmusk, vitalikbuterin, cz_binance
-16. If user says "Elon tweets" or "Elon Musk tweets" -> add nitter source with username="elonmusk"
-17. IMPORTANT: If user ONLY asks for tweets/social data (no crypto mentioned), DO NOT add exchanges or symbols - return empty symbols array and empty exchanges array
-18. If user asks ONLY for tweets, only include the nitter source in additional_sources, no CCXT sources
 
-Return valid JSON only, no markdown formatting."""
+async def parse_stream_request(
+    user_input: str,
+    api_key: str,
+    *,
+    current_spec: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
+    """
+    Parse natural language into stream configuration using a LangChain pipeline.
+    """
 
     print("[nlp_parser] Prompt submitted:", user_input, flush=True)
 
-    request_payload = {
-        "model": "deepseek-chat",
-        "messages": [
-            {"role": "user", "content": prompt}
-        ],
-        "temperature": 0.3,
-        "max_tokens": 1024
-    }
+    llm = ChatOpenAI(
+        model="deepseek-chat",
+        temperature=0.3,
+        max_tokens=1024,
+        api_key=api_key,
+        base_url="https://api.deepseek.com/v1",
+        timeout=30,
+    )
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        print(
-            "[nlp_parser] API call -> POST https://api.deepseek.com/v1/chat/completions",
-            flush=True,
-        )
-        response = await client.post(
-            "https://api.deepseek.com/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json"
-            },
-            json=request_payload
-        )
+    prompt = _PROMPT.partial(
+        available_options=_AVAILABLE_OPTIONS_TEXT,
+        rules=_RULES,
+        format_instructions=_FORMATTER.get_format_instructions(),
+        current_context=_format_current_spec(current_spec),
+    )
 
-        response.raise_for_status()
-        result = response.json()
+    chain = prompt | llm | _FORMATTER
 
-        print("[nlp_parser] API response:", result, flush=True)
-
-        response_text = result["choices"][0]["message"]["content"].strip()
-
-        # Remove markdown code blocks if present
-        if response_text.startswith("```"):
-            lines = response_text.split("\n")
-            response_text = "\n".join(lines[1:-1])
-            if response_text.startswith("json"):
-                response_text = response_text[4:].strip()
-
-        config = json.loads(response_text)
-        print("[nlp_parser] Parsed configuration:", config, flush=True)
-        return config
+    config = await chain.ainvoke({"user_request": user_input})
+    print("[nlp_parser] Parsed configuration:", config, flush=True)
+    return config

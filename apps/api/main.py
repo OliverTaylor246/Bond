@@ -8,7 +8,7 @@ from typing import Any
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 from apps.compiler import compile_spec, generate_stream_id
 from apps.runtime import StreamRuntime
 from apps.api.crypto import generate_token, get_secret
@@ -55,10 +55,42 @@ class CreateStreamResponse(BaseModel):
   spec: dict[str, Any]
 
 
+class UpdateStreamRequest(BaseModel):
+  """Request payload to update a running stream."""
+  spec: dict[str, Any]
+
+
 class StreamInfo(BaseModel):
   """Information about an active stream."""
   stream_id: str
   running: bool
+
+
+async def _build_stream_response(stream_id: str, spec: StreamSpec) -> CreateStreamResponse:
+  """Generate access tokens and WS URL for a stream."""
+  if not runtime:
+    raise HTTPException(500, "Runtime not initialized")
+
+  dispatcher = runtime.dispatcher
+  client = getattr(dispatcher, "client", None)
+  if not client:
+    raise HTTPException(500, "Dispatcher client not initialized")
+
+  secret = get_secret()
+  persistent_token = generate_token(stream_id, secret, ttl_sec=315360000)  # ~10 years
+  await client.set(f"stream:{stream_id}:token", persistent_token)
+
+  short_token = generate_token(stream_id, secret, ttl_sec=3600)
+  ws_host = os.getenv("WS_HOST", "localhost:8080")
+  ws_protocol = "wss" if "railway.app" in ws_host or "production" in ws_host else "ws"
+  ws_url = f"{ws_protocol}://{ws_host}/ws/{stream_id}?token={short_token}"
+
+  return CreateStreamResponse(
+    stream_id=stream_id,
+    access_token=persistent_token,
+    ws_url=ws_url,
+    spec=spec.model_dump(),
+  )
 
 
 @app.get("/")
@@ -143,27 +175,7 @@ async def create_stream(req: CreateStreamRequest):
     # Create metrics tracker
     metrics_registry.create(stream_id)
 
-  # Generate persistent access token (10 years TTL)
-  secret = get_secret()
-  persistent_token = generate_token(stream_id, secret, ttl_sec=315360000)  # ~10 years
-
-  # Store persistent token in Redis
-  await runtime.dispatcher.client.set(f"stream:{stream_id}:token", persistent_token)
-
-  # Also generate short-lived token for backwards compatibility with ws_url
-  token = generate_token(stream_id, secret, ttl_sec=3600)
-
-  # Build WebSocket URL (use wss:// for production, ws:// for localhost)
-  ws_host = os.getenv("WS_HOST", "localhost:8080")
-  ws_protocol = "wss" if "railway.app" in ws_host or "production" in ws_host else "ws"
-  ws_url = f"{ws_protocol}://{ws_host}/ws/{stream_id}?token={token}"
-
-  return CreateStreamResponse(
-    stream_id=stream_id,
-    access_token=persistent_token,
-    ws_url=ws_url,
-    spec=spec.model_dump(),
-  )
+  return await _build_stream_response(stream_id, spec)
 
 
 @app.get("/v1/streams", response_model=list[StreamInfo])
@@ -305,6 +317,53 @@ async def get_stream_metrics(stream_id: str):
   return metrics.to_dict()
 
 
+@app.patch("/v1/streams/{stream_id}/restart", response_model=CreateStreamResponse)
+async def restart_stream(stream_id: str):
+  """Restart a running stream by stopping and relaunching it."""
+  if not runtime:
+    raise HTTPException(500, "Runtime not initialized")
+
+  if not runtime.is_running(stream_id):
+    raise HTTPException(404, f"Stream {stream_id} not found")
+
+  # Reset metrics for the stream so uptime/latency start fresh
+  metrics_registry.delete(stream_id)
+
+  try:
+    await runtime.restart_stream(stream_id)
+    spec = runtime.get_stream_spec(stream_id)
+  except ValueError as exc:
+    raise HTTPException(400, str(exc)) from exc
+
+  metrics_registry.create(stream_id)
+  return await _build_stream_response(stream_id, spec)
+
+
+@app.put("/v1/streams/{stream_id}", response_model=CreateStreamResponse)
+async def update_stream(stream_id: str, req: UpdateStreamRequest):
+  """Update an existing stream with a new spec."""
+  if not runtime:
+    raise HTTPException(500, "Runtime not initialized")
+
+  if not runtime.is_running(stream_id):
+    raise HTTPException(404, f"Stream {stream_id} not found")
+
+  try:
+    spec = StreamSpec(**req.spec)
+  except ValidationError as exc:
+    raise HTTPException(400, f"Invalid spec: {exc}") from exc
+
+  metrics_registry.delete(stream_id)
+
+  try:
+    await runtime.update_stream(stream_id, spec)
+  except ValueError as exc:
+    raise HTTPException(400, str(exc)) from exc
+
+  metrics_registry.create(stream_id)
+  return await _build_stream_response(stream_id, spec)
+
+
 @app.get("/v1/streams/{stream_id}/schema")
 async def get_stream_schema(stream_id: str):
   """Get schema for a stream."""
@@ -334,16 +393,18 @@ async def get_stream_spec(stream_id: str):
   if not runtime:
     raise HTTPException(500, "Runtime not initialized")
 
-  if not runtime.is_running(stream_id):
-    raise HTTPException(404, f"Stream {stream_id} not found")
+  try:
+    spec = runtime.get_stream_spec(stream_id)
+  except ValueError as exc:
+    raise HTTPException(404, str(exc)) from exc
 
-  # Return empty spec for now
-  return {"stream_id": stream_id, "spec": {}}
+  return spec.model_dump()
 
 
 class NLParseRequest(BaseModel):
   """Request to parse natural language into stream config."""
   query: str
+  stream_id: str | None = None
 
 
 class NLParseResponse(BaseModel):
@@ -364,8 +425,16 @@ async def parse_nl_stream(req: NLParseRequest):
   if not api_key:
     raise HTTPException(500, "DEEPSEEK_API_KEY not configured")
 
+  current_spec: dict[str, Any] | None = None
+  if req.stream_id:
+    if not runtime:
+      raise HTTPException(500, "Runtime not initialized")
+    if not runtime.is_running(req.stream_id):
+      raise HTTPException(404, f"Stream {req.stream_id} not found")
+    current_spec = runtime.get_stream_spec(req.stream_id).model_dump()
+
   try:
-    config = await parse_stream_request(req.query, api_key)
+    config = await parse_stream_request(req.query, api_key, current_spec=current_spec)
 
     # Convert to StreamSpec format
     spec = {

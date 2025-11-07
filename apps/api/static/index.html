@@ -470,6 +470,51 @@
       color: #e5e9ff;
     }
 
+    .source-schema-block {
+      border: 1px solid rgba(62,120,178,0.2);
+      border-radius: 16px;
+      padding: 14px 16px;
+      background: rgba(8, 12, 18, 0.72);
+      margin-top: 12px;
+    }
+
+    .source-schema-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: #f1f5ff;
+      margin-bottom: 10px;
+    }
+
+    .source-schema-grid {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      font-size: 12px;
+    }
+
+    .source-schema-field {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      padding-bottom: 4px;
+      border-bottom: 1px solid rgba(62,120,178,0.12);
+    }
+
+    .source-schema-field:last-child {
+      border-bottom: none;
+      padding-bottom: 0;
+    }
+
+    .source-schema-field span:first-child {
+      font-family: var(--mono);
+      color: #e0e7ff;
+    }
+
+    .source-schema-field span:last-child {
+      color: #c3cfe4;
+      text-align: right;
+    }
+
     .code-block {
       background: rgba(14, 18, 26, 0.95);
       border: 1px solid rgba(62,120,178,0.22);
@@ -537,36 +582,6 @@
       border-color: rgba(248,113,113,0.45);
       background: rgba(127, 29, 29, 0.28);
       color: #fecaca;
-    }
-
-    .metrics-grid {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 14px 22px;
-      font-family: var(--mono);
-      font-size: 13px;
-    }
-
-    .metrics-grid div span {
-      display: block;
-      font-size: 11px;
-      color: var(--text-muted);
-      letter-spacing: 0.04em;
-      margin-bottom: 4px;
-    }
-
-    .sparkline-container {
-      height: 54px;
-      background: rgba(62,120,178,0.12);
-      border: 1px solid rgba(62,120,178,0.22);
-      border-radius: 14px;
-      padding: 4px 6px;
-    }
-
-    .sparkline-container canvas {
-      width: 100%;
-      height: 100%;
-      display: block;
     }
 
     .column-merge {
@@ -870,7 +885,6 @@
         <div class="detail-controls">
           <div class="streams-actions detail-actions">
             <button data-action="pause-all">Pause All</button>
-            <button data-action="export-all">Export Data</button>
           </div>
           <span class="status-pill" id="streamStatus" style="display:none;">• LIVE</span>
         </div>
@@ -890,7 +904,6 @@
           <h2>Active Streams</h2>
           <div class="streams-actions">
             <button data-action="pause-all">Pause All</button>
-            <button data-action="export-all">Export Data</button>
           </div>
         </div>
         <p>Launch new streams from the chat, then jump back in here to inspect performance and metadata.</p>
@@ -984,7 +997,7 @@
     }
 
     const pauseAllButtons = Array.from(document.querySelectorAll('[data-action="pause-all"]'));
-    const exportAllButtons = Array.from(document.querySelectorAll('[data-action="export-all"]'));
+    const pollTimers = new Map();
 
     function setPauseButtonLabels() {
       pauseAllButtons.forEach(btn => {
@@ -1000,17 +1013,63 @@
       });
     });
 
-    exportAllButtons.forEach(btn => {
-      btn.addEventListener('click', () => {
-        if (!currentStreamId) {
-          appendMessage('agent', 'Select a stream to export data first.');
-          return;
-        }
-        exportData(currentStreamId, 'csv');
-      });
-    });
-
     setPauseButtonLabels();
+
+    function cloneSpec(spec) {
+      if (!spec) return spec;
+      try {
+        return structuredClone(spec);
+      } catch (err) {
+        return JSON.parse(JSON.stringify(spec));
+      }
+    }
+
+    function getDefaultTargetStreamId() {
+      if (currentStreamId && activeStreams.has(currentStreamId)) {
+        return currentStreamId;
+      }
+      const iterator = activeStreams.keys();
+      const first = iterator.next();
+      return first.done ? null : first.value;
+    }
+
+    function shouldRequestNewStream(text) {
+      const query = text.toLowerCase();
+      return /\b(new|another|separate)\s+(stream|feed)\b/.test(query)
+        || query.includes('create a new stream')
+        || query.includes('start a new')
+        || query.includes('spin up a new')
+        || query.includes('brand new stream');
+    }
+
+    function applyStreamResponse(stream) {
+      if (!stream || !stream.stream_id) return;
+      const entry = activeStreams.get(stream.stream_id);
+      if (!entry) {
+        addSession(stream.stream_id, stream.ws_url, stream.spec);
+        return;
+      }
+      entry.spec = cloneSpec(stream.spec);
+      entry.wsUrl = stream.ws_url;
+      entry.metrics = null;
+      entry.schema = null;
+      entry.derivedSchema = null;
+      entry.lastEvent = null;
+      entry.latencyHistory = [];
+      entry.priceHistory = [];
+      entry.createdAt = Date.now();
+      entry.status = 'CONNECTING';
+      if (entry.socket) {
+        entry.socket.close();
+        entry.socket = null;
+      }
+      openStreamSocket(entry);
+      refreshMetrics(stream.stream_id);
+      renderSessions();
+      if (currentStreamId === stream.stream_id) {
+        renderStreamDetail(entry);
+      }
+    }
 
     chatForm.addEventListener('submit', async (event) => {
       event.preventDefault();
@@ -1020,16 +1079,23 @@
       appendMessage('user', escapeHtml(prompt));
       messageInput.value = '';
 
+      const wantsNewStream = shouldRequestNewStream(prompt);
+      const targetStreamId = wantsNewStream ? null : getDefaultTargetStreamId();
+      const payload = { query: prompt };
+      if (targetStreamId) {
+        payload.stream_id = targetStreamId;
+      }
+
       const pending = appendMessage('agent', `Parsing “${escapeHtml(prompt)}”…`);
       try {
         const response = await fetch('/v1/streams/parse', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ query: prompt }),
+          body: JSON.stringify(payload),
         });
         if (!response.ok) throw new Error(await response.text());
         const parsed = await response.json();
-        renderParseSummary(parsed, pending);
+        renderParseSummary(parsed, pending, targetStreamId, wantsNewStream);
       } catch (err) {
         pending.innerHTML = `
           <div>Error parsing request.</div>
@@ -1038,8 +1104,25 @@
       }
     });
 
-    function renderParseSummary(parsed, bubble) {
-      const rows = parsed.spec.sources.filter(src => src.type === 'ccxt').map(src => `
+    function renderParseSummary(parsed, bubble, preferredStreamId = null, forcedNew = false) {
+      const spec = parsed.spec || { sources: [], symbols: [], interval_sec: 1 };
+      const sources = Array.isArray(spec.sources) ? spec.sources : [];
+      const ccxtSources = sources.filter(src => src.type === 'ccxt');
+      const otherSources = sources.filter(src => src.type !== 'ccxt');
+
+      let targetStreamId = preferredStreamId && activeStreams.has(preferredStreamId)
+        ? preferredStreamId
+        : null;
+      if (!targetStreamId && !forcedNew) {
+        targetStreamId = getDefaultTargetStreamId();
+      }
+      const allowUpdate = Boolean(targetStreamId && activeStreams.has(targetStreamId) && !forcedNew);
+      const targetStream = allowUpdate ? activeStreams.get(targetStreamId) : null;
+      const targetLabel = targetStream
+        ? ` (${escapeHtml((targetStream.spec.symbols || []).join(', ') || targetStreamId.slice(0, 8))})`
+        : '';
+
+      const rows = ccxtSources.map(src => `
         <tr>
           <td>${escapeHtml((src.exchange || 'BINANCEUS').toUpperCase())}</td>
           <td>${escapeHtml((src.symbols || []).join(', '))}</td>
@@ -1047,8 +1130,31 @@
         </tr>
       `).join('');
 
-      bubble.innerHTML = `
-        <div>Here’s the stream I can create:</div>
+      const otherRows = otherSources.map(src => {
+        let detail = '';
+        if (src.type === 'nitter') {
+          const handle = src.username ? `@${src.username}` : 'nitter feed';
+          const cadence = src.interval_sec ? `${src.interval_sec}s` : `${spec.interval_sec || 1}s`;
+          detail = `${handle}, refresh ${cadence}`;
+        } else if (src.type === 'google_trends') {
+          const keywords = (src.keywords || []).join(', ') || 'auto keywords';
+          const timeframe = src.timeframe || 'default window';
+          detail = `keywords: ${keywords} • timeframe: ${timeframe}`;
+        } else {
+          detail = Object.entries(src)
+            .filter(([key]) => key !== 'type')
+            .map(([key, value]) => `${key}: ${Array.isArray(value) ? value.join(', ') : value}`)
+            .join(' • ') || 'No extra config';
+        }
+        return `
+          <tr>
+            <td>${escapeHtml(src.type || 'custom')}</td>
+            <td>${escapeHtml(detail)}</td>
+          </tr>
+        `;
+      }).join('');
+
+      const ccxtTable = ccxtSources.length ? `
         <table style="margin-top:12px;border-collapse:collapse;width:100%;font-size:12px;">
           <thead>
             <tr style="background:rgba(62,120,178,0.18);">
@@ -1057,53 +1163,127 @@
               <th style="padding:6px 8px;text-align:left;border:1px solid rgba(62,120,178,0.16);">Fields</th>
             </tr>
           </thead>
-          <tbody>${rows || '<tr><td colspan="3" style="padding:8px;color:#f87171;">No CCXT source detected.</td></tr>'}</tbody>
+          <tbody>${rows}</tbody>
         </table>
-        <div style="margin-top:12px;display:flex;gap:10px;">
-          <button id="confirmLaunchBtn" style="border:1px solid rgba(0,75,168,0.4);background:rgba(0,75,168,0.22);color:#e0ecff;padding:8px 12px;border-radius:12px;font-size:12px;cursor:pointer;">Launch</button>
+      ` : '';
+
+      const updateNote = allowUpdate
+        ? `<div style="margin-top:8px;font-size:12px;color:#9fb3d4;">
+            Applying changes to stream <code>${escapeHtml(targetStreamId)}</code>${targetLabel}.
+            Choose “Create New Stream” to start a separate feed.
+          </div>`
+        : '';
+
+      bubble.innerHTML = `
+        <div>Here’s the stream I can create:</div>
+        ${updateNote}
+        ${ccxtTable || ''}
+        ${!ccxtTable ? '<div style="margin-top:12px;font-size:12px;color:#94a3b8;">No CCXT exchange sources configured.</div>' : ''}
+        ${otherSources.length ? `
+          <div style="margin-top:16px;font-size:12px;color:#c3cfe4;">Additional sources</div>
+          <table style="margin-top:6px;border-collapse:collapse;width:100%;font-size:12px;">
+            <thead>
+              <tr style="background:rgba(62,120,178,0.12);">
+                <th style="padding:6px 8px;text-align:left;border:1px solid rgba(62,120,178,0.16);">Type</th>
+                <th style="padding:6px 8px;text-align:left;border:1px solid rgba(62,120,178,0.16);">Details</th>
+              </tr>
+            </thead>
+            <tbody>${otherRows}</tbody>
+          </table>
+        ` : ''}
+        <div style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap;">
+          ${allowUpdate ? '<button id="updateStreamBtn" style="border:1px solid rgba(16,185,129,0.45);background:rgba(16,185,129,0.18);color:#d1fae5;padding:8px 12px;border-radius:12px;font-size:12px;cursor:pointer;">Update Stream</button>' : ''}
+          <button id="createStreamBtn" style="border:1px solid rgba(0,75,168,0.4);background:rgba(0,75,168,0.22);color:#e0ecff;padding:8px 12px;border-radius:12px;font-size:12px;cursor:pointer;">${allowUpdate ? 'Create New Stream' : 'Launch Stream'}</button>
           <button id="cancelLaunchBtn" style="border:1px solid rgba(148,163,184,0.3);background:rgba(148,163,184,0.12);color:#c3cfe4;padding:8px 12px;border-radius:12px;font-size:12px;cursor:pointer;">Modify</button>
         </div>
       `;
 
-      bubble.querySelector('#confirmLaunchBtn').addEventListener('click', async () => {
-        bubble.innerHTML = 'Launching stream…';
-        try {
-          const response = await fetch('/v1/streams', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ spec: parsed.spec }),
-          });
-          if (!response.ok) throw new Error(await response.text());
-          const stream = await response.json();
-          addSession(stream.stream_id, stream.ws_url, parsed.spec);
-          bubble.innerHTML = `
-            Stream <code>${escapeHtml(stream.stream_id)}</code> started.
-            <div style="margin-top:10px;">
-              <a href="#" data-open-stream="${stream.stream_id}" style="color:var(--accent);text-decoration:none;">Open stream workspace →</a>
-            </div>
-          `;
-          const openLink = bubble.querySelector('[data-open-stream]');
-          if (openLink) {
-            openLink.addEventListener('click', (event) => {
-              event.preventDefault();
-              loadStream(stream.stream_id);
+      const createBtn = bubble.querySelector('#createStreamBtn');
+      if (createBtn) {
+        createBtn.addEventListener('click', async () => {
+          bubble.innerHTML = 'Launching stream…';
+          try {
+            const response = await fetch('/v1/streams', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ spec }),
             });
+            if (!response.ok) throw new Error(await response.text());
+            const stream = await response.json();
+            addSession(stream.stream_id, stream.ws_url, stream.spec);
+            bubble.innerHTML = `
+              Stream <code>${escapeHtml(stream.stream_id)}</code> started.
+              <div style="margin-top:10px;">
+                <a href="#" data-open-stream="${stream.stream_id}" style="color:var(--accent);text-decoration:none;">Open stream workspace →</a>
+              </div>
+            `;
+            const openLink = bubble.querySelector('[data-open-stream]');
+            if (openLink) {
+              openLink.addEventListener('click', (event) => {
+                event.preventDefault();
+                loadStream(stream.stream_id);
+              });
+            }
+          } catch (err) {
+            bubble.innerHTML = `Failed to launch: ${escapeHtml(err.message)}`;
           }
-        } catch (err) {
-          bubble.innerHTML = `Failed to launch: ${escapeHtml(err.message)}`;
-        }
-      });
+        });
+      }
 
-      bubble.querySelector('#cancelLaunchBtn').addEventListener('click', () => {
-        bubble.innerHTML = 'Okay — adjust your request and send again.';
-      });
+      if (allowUpdate) {
+        const updateBtn = bubble.querySelector('#updateStreamBtn');
+        if (updateBtn) {
+          updateBtn.addEventListener('click', async () => {
+            bubble.innerHTML = `Updating stream <code>${escapeHtml(targetStreamId)}</code>…`;
+            try {
+              const response = await fetch(`/v1/streams/${targetStreamId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ spec }),
+              });
+              if (!response.ok) throw new Error(await response.text());
+              const stream = await response.json();
+              applyStreamResponse(stream);
+              bubble.innerHTML = `Stream <code>${escapeHtml(stream.stream_id)}</code> updated.`;
+            } catch (err) {
+              bubble.innerHTML = `Failed to update: ${escapeHtml(err.message)}`;
+            }
+          });
+        }
+      }
+
+      const cancelBtn = bubble.querySelector('#cancelLaunchBtn');
+      if (cancelBtn) {
+        cancelBtn.addEventListener('click', () => {
+          bubble.innerHTML = 'Okay — adjust your request and send again.';
+        });
+      }
+    }
+
+    function cancelPoll(streamId) {
+      const timer = pollTimers.get(streamId);
+      if (timer) {
+        clearTimeout(timer);
+        pollTimers.delete(streamId);
+      }
+    }
+
+    function schedulePoll(streamId) {
+      cancelPoll(streamId);
+      const timer = setTimeout(() => {
+        pollTimers.delete(streamId);
+        pollStreamData(streamId);
+      }, 10000);
+      pollTimers.set(streamId, timer);
     }
 
     function addSession(streamId, wsUrl, spec) {
+      const snapshot = cloneSpec(spec);
+      const createdAt = snapshot?.created_at ? new Date(snapshot.created_at).getTime() : Date.now();
       activeStreams.set(streamId, {
         streamId,
         wsUrl,
-        spec,
+        spec: snapshot,
         metrics: null,
         schema: null,
         derivedSchema: null,
@@ -1112,13 +1292,14 @@
         latencyHistory: [],
         lastEvent: null,
         socket: null,
-        createdAt: spec?.created_at ? new Date(spec.created_at).getTime() : Date.now(),
+        createdAt,
       });
       renderSessions();
       const entry = activeStreams.get(streamId);
       if (entry) {
         openStreamSocket(entry);
       }
+      cancelPoll(streamId);
       pollStreamData(streamId);
     }
 
@@ -1248,6 +1429,10 @@
     }
 
     async function pollStreamData(streamId) {
+      if (!activeStreams.has(streamId)) {
+        cancelPoll(streamId);
+        return;
+      }
       try {
         const [schemaRes, metricsRes] = await Promise.all([
           fetch(`/v1/streams/${streamId}/schema`),
@@ -1258,26 +1443,29 @@
         const schema = await schemaRes.json();
         const metrics = await metricsRes.json();
         const entry = activeStreams.get(streamId);
-        if (entry) {
-          if (schema && Object.keys(schema).length) {
-            entry.schema = schema;
-          }
-          entry.metrics = metrics;
-          entry.status = metrics.status || 'LIVE';
-          if (metrics.created_at && !Number.isNaN(Date.parse(metrics.created_at))) {
-            entry.createdAt = new Date(metrics.created_at).getTime();
-          }
-          if (metrics.latency_ms != null) {
-            entry.latencyHistory.push(metrics.latency_ms);
-            if (entry.latencyHistory.length > 20) entry.latencyHistory.shift();
-          }
-          if (currentStreamId === streamId) renderStreamDetail(entry);
-          renderSessions();
+        if (!entry) return;
+        if (schema && Object.keys(schema).length) {
+          entry.schema = schema;
         }
+        entry.metrics = metrics;
+        entry.status = metrics.status || 'LIVE';
+        if (metrics.created_at && !Number.isNaN(Date.parse(metrics.created_at))) {
+          entry.createdAt = new Date(metrics.created_at).getTime();
+        }
+        if (metrics.latency_ms != null) {
+          entry.latencyHistory.push(metrics.latency_ms);
+          if (entry.latencyHistory.length > 20) entry.latencyHistory.shift();
+        }
+        if (currentStreamId === streamId) renderStreamDetail(entry);
+        renderSessions();
       } catch (err) {
         console.warn('Metrics fetch failed', err);
       } finally {
-        setTimeout(() => pollStreamData(streamId), 10000);
+        if (activeStreams.has(streamId)) {
+          schedulePoll(streamId);
+        } else {
+          cancelPoll(streamId);
+        }
       }
     }
 
@@ -1301,16 +1489,6 @@
       }
       const latency = latencyValue != null ? `${latencyValue.toFixed(1)} ms` : '—';
       const latestPrice = extractRepresentativePrice(stream.lastEvent);
-      const currentTick = stream.metrics?.current_tick || stream.lastEvent?.ts || stream.lastEvent?.window_end || '—';
-      const eventsPerMinute = stream.metrics?.events_last_minute ?? '—';
-      const dropped = stream.metrics?.dropped ?? '—';
-      let uptime = stream.metrics?.uptime;
-      if (!uptime && stream.createdAt) {
-        const diffMs = Date.now() - stream.createdAt;
-        uptime = formatDuration(diffMs);
-      }
-      uptime = uptime || '—';
-      const subscribers = stream.metrics?.subscribers ?? '—';
 
       if (headerSummary) {
         headerSummary.innerHTML = `
@@ -1329,6 +1507,8 @@
       streamStatus.className = 'status-pill ' + (stream.status.toUpperCase().includes('STOP') ? 'error' : stream.status.toUpperCase().includes('PAUSE') ? 'warn' : '');
 
       const schemaToRender = getDisplaySchema(stream);
+      const sourceSchemaHtml = renderSourceSchemaBlocks(stream);
+      const lastEventJson = stream.lastEvent ? JSON.stringify(stream.lastEvent, null, 2) : null;
 
       detailBody.innerHTML = `
         <div class="panel">
@@ -1364,6 +1544,16 @@
             <button class="action-btn" onclick="copySchema('${stream.streamId}', 'csv')">Copy CSV Header</button>
           </div>
         </div>
+        ${sourceSchemaHtml ? `
+        <div class="panel">
+          <h3>Source Schemas</h3>
+          ${sourceSchemaHtml}
+        </div>` : ''}
+        ${lastEventJson ? `
+        <div class="panel">
+          <h3>Latest Event</h3>
+          <pre style="max-height:220px;overflow:auto;font-family:var(--mono);font-size:12px;border:1px solid rgba(62,120,178,0.2);border-radius:12px;padding:12px;background:rgba(7,10,16,0.95);color:#d9e3f5;">${escapeHtml(lastEventJson)}</pre>
+        </div>` : ''}
         <div class="panel column-merge">
           <h3>Integration Snippets</h3>
           <div class="code-block">
@@ -1377,25 +1567,6 @@
           <div class="code-block">
             <button onclick="copySnippet('curl-${stream.streamId}')">Copy</button>
             <pre><code id="curl-${stream.streamId}"></code></pre>
-          </div>
-        </div>
-        <div class="panel">
-          <h3>Live Metrics</h3>
-          <div class="metrics-grid">
-            <div><span>Current tick</span>${escapeHtml(String(currentTick))}</div>
-            <div><span>Events (60s)</span>${eventsPerMinute}</div>
-            <div><span>Mean latency</span>${latency}</div>
-            <div><span>Dropped packets</span>${dropped}</div>
-            <div><span>Uptime</span>${uptime}</div>
-            <div><span>Subscribers</span>${subscribers}</div>
-          </div>
-          <div class="sparkline-container" id="latencySpark-${stream.streamId}">
-            <canvas></canvas>
-          </div>
-          <div style="display:flex;gap:10px;">
-            <button class="action-btn" onclick="refreshMetrics('${stream.streamId}')">Refresh</button>
-            <button class="action-btn" onclick="exportData('${stream.streamId}', 'csv')">Export CSV (1h)</button>
-            <button class="action-btn" onclick="exportData('${stream.streamId}', 'parquet')">Export Parquet</button>
           </div>
         </div>
         <div class="panel">
@@ -1418,7 +1589,6 @@
       setSnippet(`ws-${stream.streamId}`, 'url', wsActual, wsDisplay);
       setSnippet(`curl-${stream.streamId}`, 'shell', curlSnippet);
 
-      requestAnimationFrame(() => renderLatencySparkline(stream));
     }
 
     function copySchema(streamId, type) {
@@ -1499,6 +1669,44 @@
       return null;
     }
 
+    const MARKET_ONLY_FIELDS = new Set([
+      'price_avg', 'price_high', 'price_low', 'price_open', 'price_close',
+      'bid_avg', 'ask_avg', 'bid_volume', 'ask_volume',
+      'volume_sum', 'volume_base_sum',
+      'onchain_count', 'onchain_value_sum',
+      'custom_count'
+    ]);
+
+    const SOURCE_SCHEMA_DEFS = {
+      ccxt: [
+        { name: 'ts', type: 'timestamp', description: 'Event timestamp (UTC)' },
+        { name: 'window_start', type: 'timestamp', description: 'Window start for aggregation' },
+        { name: 'window_end', type: 'timestamp', description: 'Window end for aggregation' },
+        { name: 'price_open', type: 'float', description: 'First trade price in window' },
+        { name: 'price_high', type: 'float', description: 'Highest trade price in window' },
+        { name: 'price_low', type: 'float', description: 'Lowest trade price in window' },
+        { name: 'price_close', type: 'float', description: 'Last trade price in window' },
+        { name: 'price_avg', type: 'float', description: 'VWAP for the window' },
+        { name: 'volume_sum', type: 'float', description: 'Total traded quote volume' },
+        { name: 'raw_data.exchange_data', type: 'object', description: 'Per-exchange book/trade payloads' }
+      ],
+      nitter: [
+        { name: 'ts', type: 'timestamp', description: 'Ingestion timestamp' },
+        { name: 'tweets', type: 'int', description: 'Tweets observed in window' },
+        { name: 'raw_data.tweet_data.text', type: 'string', description: 'Tweet text' },
+        { name: 'raw_data.tweet_data.timestamp_posted', type: 'string', description: 'Original tweet timestamp' },
+        { name: 'raw_data.tweet_data.stats', type: 'string', description: 'Like/retweet/reply stats' },
+        { name: 'raw_data.tweet_data.symbol', type: 'string', description: 'Handle or symbol extracted' },
+        { name: 'raw_data.tweet_data.event_type', type: 'string', description: 'Event type, e.g. tweet' }
+      ],
+      google_trends: [
+        { name: 'ts', type: 'timestamp', description: 'Collection timestamp' },
+        { name: 'raw_data.keyword', type: 'string', description: 'Keyword tracked' },
+        { name: 'raw_data.score', type: 'int', description: 'Relative interest score' },
+        { name: 'raw_data.geo', type: 'string', description: 'Region (if specified)' }
+      ]
+    };
+
     function deriveSchemaFromEvent(event) {
       if (!event || typeof event !== 'object') return null;
       const result = {};
@@ -1506,6 +1714,56 @@
         result[key] = inferType(value);
       }
       return result;
+    }
+
+    function normalizeSchemaDict(schema) {
+      if (!schema) return null;
+      if (Array.isArray(schema)) {
+        const map = {};
+        for (const field of schema) {
+          if (!field || typeof field !== 'object' || !field.name) continue;
+          const meta = {};
+          if (field.type) meta.type = field.type;
+          if (field.optional != null) meta.optional = Boolean(field.optional);
+          if (field.description) meta.description = field.description;
+          map[field.name] = Object.keys(meta).length ? meta : 'any';
+        }
+        return Object.keys(map).length ? map : null;
+      }
+      if (schema.fields && Array.isArray(schema.fields)) {
+        return normalizeSchemaDict(schema.fields);
+      }
+      if (typeof schema === 'object') {
+        const map = {};
+        for (const [key, value] of Object.entries(schema)) {
+          if (key === 'stream_id') continue;
+          if (key === 'fields' && Array.isArray(value)) {
+            const nested = normalizeSchemaDict(value);
+            if (nested) Object.assign(map, nested);
+            continue;
+          }
+          map[key] = value;
+        }
+        return Object.keys(map).length ? map : null;
+      }
+      return null;
+    }
+
+    function collectSourceSchemaUnion(stream) {
+      const union = {};
+      if (!stream?.spec?.sources) return union;
+      for (const source of stream.spec.sources) {
+        const defs = SOURCE_SCHEMA_DEFS[source.type];
+        if (!defs) continue;
+        for (const field of defs) {
+          union[field.name] = {
+            type: field.type,
+            optional: field.optional ?? false,
+            description: field.description,
+          };
+        }
+      }
+      return union;
     }
 
     function inferType(value) {
@@ -1523,22 +1781,91 @@
       return { type: typeof value };
     }
 
+    function describeSourceTitle(source, stream) {
+      if (!source) return 'Source';
+      if (source.type === 'ccxt') {
+        const exchange = (source.exchange || 'binanceus').toUpperCase();
+        const symbols = (source.symbols && source.symbols.length ? source.symbols : stream.spec?.symbols || []).join(', ');
+        return `CCXT · ${exchange}${symbols ? ` · ${symbols}` : ''}`;
+      }
+      if (source.type === 'nitter') {
+        return `Nitter · @${source.username || 'elonmusk'}`;
+      }
+      if (source.type === 'google_trends') {
+        const keywords = (source.keywords || []).join(', ');
+        return keywords ? `Google Trends · ${keywords}` : 'Google Trends';
+      }
+      return source.type.toUpperCase();
+    }
+
+    function renderSourceSchemaBlocks(stream) {
+      const sources = stream.spec?.sources || [];
+      const blocks = [];
+      for (const source of sources) {
+        const defs = SOURCE_SCHEMA_DEFS[source.type];
+        if (!defs || !defs.length) continue;
+        const rows = defs.map(field => `
+          <div class="source-schema-field">
+            <span>${escapeHtml(field.name)}</span>
+            <span>${escapeHtml(field.type)}${field.description ? ` · ${escapeHtml(field.description)}` : ''}</span>
+          </div>
+        `).join('');
+        blocks.push(`
+          <div class="source-schema-block">
+            <div class="source-schema-title">${escapeHtml(describeSourceTitle(source, stream))}</div>
+            <div class="source-schema-grid">
+              ${rows}
+            </div>
+          </div>
+        `);
+      }
+      return blocks.join('');
+    }
+
     function getDisplaySchema(stream) {
-      const base = (stream.schema && Object.keys(stream.schema).length) ? stream.schema : (stream.derivedSchema || {});
-      const entries = Object.entries(base || {});
+      const normalized = normalizeSchemaDict(stream.schema);
+      const base = normalized && Object.keys(normalized).length ? normalized : {};
+      const derived = stream.derivedSchema || {};
+      const combined = { ...base, ...derived };
+      const entries = Object.entries(combined);
       const filtered = {};
       const eventKeys = stream.lastEvent ? new Set(Object.keys(stream.lastEvent)) : null;
+      const hasCcxtSource = (stream.spec?.sources || []).some(src => src.type === 'ccxt');
 
       for (const [field, meta] of entries) {
         if (eventKeys && !eventKeys.has(field)) continue;
         filtered[field] = meta;
       }
 
-      if ((!filtered.symbol) && ((stream.spec?.symbols || []).length > 1 || stream.lastEvent?.symbol)) {
-        filtered.symbol = { type: 'string' };
+      let candidate;
+      if (Object.keys(filtered).length) {
+        candidate = filtered;
+      } else if (Object.keys(derived).length) {
+        candidate = { ...derived };
+      } else {
+        candidate = { ...combined };
       }
 
-      return filtered;
+      if (!hasCcxtSource) {
+        for (const field of Object.keys(candidate)) {
+          if (MARKET_ONLY_FIELDS.has(field)) {
+            delete candidate[field];
+          }
+        }
+      }
+
+      if (!Object.keys(candidate).length) {
+        const union = collectSourceSchemaUnion(stream);
+        if (Object.keys(union).length) {
+          Object.assign(candidate, union);
+        }
+      }
+
+      if ((!candidate.symbol) && ((stream.spec?.symbols || []).length > 1 || stream.lastEvent?.symbol)) {
+        candidate.symbol = { type: 'string' };
+      }
+
+      return Object.keys(candidate).length ? candidate : null;
     }
 
     function formatDuration(milliseconds) {
@@ -1567,36 +1894,13 @@
       }
     }
 
-    async function exportData(streamId, format) {
-      try {
-        const response = await fetch(`/v1/streams/${streamId}/export?format=${format}`);
-        if (!response.ok) throw new Error(await response.text());
-        const blob = await response.blob();
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = `${streamId}.${format}`;
-        link.click();
-        URL.revokeObjectURL(url);
-      } catch (err) {
-        appendMessage('agent', `Export failed: ${escapeHtml(err.message)}`);
-      }
-    }
-
     async function restartStream(streamId) {
-      const entry = activeStreams.get(streamId);
       try {
-        await fetch(`/v1/streams/${streamId}/restart`, { method: 'PATCH' });
+        const response = await fetch(`/v1/streams/${streamId}/restart`, { method: 'PATCH' });
+        if (!response.ok) throw new Error(await response.text());
+        const stream = await response.json();
+        applyStreamResponse(stream);
         appendMessage('agent', `Stream ${escapeHtml(streamId)} restarted.`);
-        if (entry?.socket) {
-          entry.socket.close();
-          entry.socket = null;
-        }
-        if (entry) {
-          entry.status = 'CONNECTING';
-          openStreamSocket(entry);
-        }
-        refreshMetrics(streamId);
       } catch (err) {
         appendMessage('agent', `Restart failed: ${escapeHtml(err.message)}`);
       }
@@ -1609,12 +1913,12 @@
         const response = await fetch('/v1/streams', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ spec: entry.spec }),
+          body: JSON.stringify({ spec: cloneSpec(entry.spec) }),
         });
         if (!response.ok) throw new Error(await response.text());
         const stream = await response.json();
         appendMessage('agent', `Duplicated stream as <code>${escapeHtml(stream.stream_id)}</code>.`);
-        addSession(stream.stream_id, stream.ws_url, entry.spec);
+        addSession(stream.stream_id, stream.ws_url, stream.spec);
         loadStream(stream.stream_id);
       } catch (err) {
         appendMessage('agent', `Duplicate failed: ${escapeHtml(err.message)}`);
@@ -1642,7 +1946,8 @@
       const entry = activeStreams.get(streamId);
       if (!entry) return;
       try {
-        await fetch(`/v1/streams/${streamId}`, { method: 'DELETE' });
+        const response = await fetch(`/v1/streams/${streamId}`, { method: 'DELETE' });
+        if (!response.ok) throw new Error(await response.text());
         appendMessage('agent', `Stream ${escapeHtml(streamId)} stopped.`);
         if (entry.socket) {
           entry.socket.close();
@@ -1650,6 +1955,7 @@
         }
         const removedWasCurrent = streamId === currentStreamId;
         activeStreams.delete(streamId);
+        cancelPoll(streamId);
         if (removedWasCurrent) {
           currentStreamId = null;
           detailBody.innerHTML = '<div class="panel column-merge" style="text-align:center;opacity:0.6;"><h3>Stream stopped</h3><p style="font-size:13px;color:var(--text-muted);">Select another stream or launch a new one.</p></div>';
@@ -1662,34 +1968,6 @@
       } catch (err) {
         appendMessage('agent', `Failed to stop stream: ${escapeHtml(err.message)}`);
       }
-    }
-
-    function renderLatencySparkline(stream) {
-      const container = document.getElementById(`latencySpark-${stream.streamId}`);
-      if (!container) return;
-      const canvas = container.querySelector('canvas');
-      const ctx = canvas.getContext('2d');
-      const chartData = stream.latencyHistory.slice(-20);
-      if (!chartData.length) {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        ctx.fillStyle = 'var(--text-muted)';
-        ctx.font = '11px var(--mono)';
-        ctx.fillText('No latency samples yet', 10, 28);
-        return;
-      }
-      const maxLatency = Math.max(...chartData);
-      const minLatency = Math.min(...chartData);
-      const span = maxLatency - minLatency || 1;
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.strokeStyle = 'rgba(0,75,168,0.6)';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      chartData.forEach((value, idx) => {
-        const x = (idx / (chartData.length - 1)) * canvas.width;
-        const y = canvas.height - ((value - minLatency) / span) * (canvas.height - 4) - 2;
-        if (idx === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-      });
-      ctx.stroke();
     }
 
     document.addEventListener('keydown', (event) => {

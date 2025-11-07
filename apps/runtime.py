@@ -28,6 +28,7 @@ class StreamRuntime:
     self.redis_url = redis_url
     self.active_streams: dict[str, asyncio.Task] = {}
     self.dispatcher = RedisDispatcher(redis_url)
+    self.stream_specs: dict[str, StreamSpec] = {}
 
   async def start(self) -> None:
     """Initialize runtime and connect to Redis."""
@@ -54,6 +55,9 @@ class StreamRuntime:
     """
     if stream_id in self.active_streams:
       raise ValueError(f"Stream {stream_id} already running")
+
+    # Track spec for later inspection/restart
+    self.stream_specs[stream_id] = spec
 
     # Create task for this stream
     task = asyncio.create_task(self._run_stream(stream_id, spec))
@@ -394,17 +398,17 @@ class StreamRuntime:
 
     return preference
 
-  async def stop_stream(self, stream_id: str) -> None:
+  async def stop_stream(self, stream_id: str, *, preserve_spec: bool = False) -> None:
     """
     Stop a running stream.
 
     Args:
       stream_id: Stream identifier
     """
-    if stream_id not in self.active_streams:
+    task = self.active_streams.get(stream_id)
+    if not task:
       raise ValueError(f"Stream {stream_id} not running")
 
-    task = self.active_streams[stream_id]
     task.cancel()
 
     try:
@@ -412,7 +416,29 @@ class StreamRuntime:
     except asyncio.CancelledError:
       pass
 
-    del self.active_streams[stream_id]
+    self.active_streams.pop(stream_id, None)
+    if not preserve_spec:
+      self.stream_specs.pop(stream_id, None)
+
+  async def restart_stream(self, stream_id: str) -> None:
+    """Restart a running stream with its last known spec."""
+    if stream_id not in self.active_streams:
+      raise ValueError(f"Stream {stream_id} not running")
+
+    spec = self.stream_specs.get(stream_id)
+    if not spec:
+      raise ValueError(f"Spec for stream {stream_id} not found")
+
+    await self.stop_stream(stream_id, preserve_spec=True)
+    await self.launch_stream(stream_id, spec)
+
+  async def update_stream(self, stream_id: str, spec: StreamSpec) -> None:
+    """Replace a stream's spec and relaunch it."""
+    if stream_id not in self.active_streams:
+      raise ValueError(f"Stream {stream_id} not running")
+
+    await self.stop_stream(stream_id)
+    await self.launch_stream(stream_id, spec)
 
   def is_running(self, stream_id: str) -> bool:
     """
@@ -434,3 +460,10 @@ class StreamRuntime:
       List of stream IDs
     """
     return list(self.active_streams.keys())
+
+  def get_stream_spec(self, stream_id: str) -> StreamSpec:
+    """Return the stored StreamSpec for a running stream."""
+    spec = self.stream_specs.get(stream_id)
+    if not spec:
+      raise ValueError(f"Spec for stream {stream_id} not found")
+    return spec
