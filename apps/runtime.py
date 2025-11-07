@@ -16,6 +16,7 @@ from connectors.x_stream import x_stream
 from connectors.custom_ws import custom_stream
 from connectors.onchain_grpc import onchain_stream
 from connectors.google_trends_stream import google_trends_stream
+from connectors.nitter_playwright import nitter_playwright_stream
 
 BASE_EXCHANGE_PREFERENCE = ["binanceus", "binance"]
 
@@ -296,6 +297,30 @@ class StreamRuntime:
         )
       )
 
+    def add_nitter_source(source_cfg: dict) -> None:
+      username = source_cfg.get("username", "elonmusk")
+      interval_override = int(source_cfg.get("interval_sec") or interval)
+      interval_override = max(1, interval_override)
+
+      def create_stream():
+        print(
+          f"[runtime] Starting Nitter stream for @{username} (interval={interval_override}s)",
+          flush=True,
+        )
+        return nitter_playwright_stream(username=username, interval=interval_override)
+
+      pipeline_sources.append(
+        SourceConfig(
+          name=next_name("nitter"),
+          type="nitter",
+          create_stream=create_stream,
+          metadata={
+            "username": username,
+            "interval_sec": interval_override,
+          },
+        )
+      )
+
     handlers = {
       "ccxt": add_ccxt_source,
       "twitter": add_twitter_source,
@@ -303,6 +328,7 @@ class StreamRuntime:
       "onchain": add_onchain_source,
       "onchain.grpc": add_onchain_source,
       "custom": add_custom_source,
+      "nitter": add_nitter_source,
     }
 
     for source in spec.sources:

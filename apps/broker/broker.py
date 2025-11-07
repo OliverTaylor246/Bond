@@ -43,6 +43,12 @@ async def root():
   return {"status": "ok", "service": "broker"}
 
 
+@app.get("/health")
+async def health():
+  """Railway healthcheck endpoint."""
+  return {"status": "ok", "service": "broker"}
+
+
 def parse_from_param(from_param: Optional[str]) -> Optional[float]:
   """
   Parse ?from= query parameter to Unix timestamp.

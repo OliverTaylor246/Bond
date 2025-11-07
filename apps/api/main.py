@@ -15,6 +15,7 @@ from apps.api.crypto import generate_token, get_secret
 from apps.api.limits import limits
 from apps.api.metrics import metrics_registry
 from apps.api.nlp_parser import parse_stream_request
+from engine.schemas import StreamSpec
 
 
 # Global runtime instance
@@ -49,6 +50,7 @@ class CreateStreamRequest(BaseModel):
 class CreateStreamResponse(BaseModel):
   """Response with stream details."""
   stream_id: str
+  access_token: str
   ws_url: str
   spec: dict[str, Any]
 
@@ -90,12 +92,49 @@ async def create_stream(req: CreateStreamRequest):
 
   # Compile spec
   if req.natural_language:
-    spec = compile_spec(req.natural_language)
-    print(
-      "[api] NL request parsed to StreamSpec:",
-      spec.model_dump(),
-      flush=True,
-    )
+    # Use DeepSeek NL parser instead of basic parser
+    api_key = os.getenv("DEEPSEEK_API_KEY")
+    if not api_key:
+      raise HTTPException(500, "DEEPSEEK_API_KEY not configured")
+
+    # Parse with DeepSeek
+    config = await parse_stream_request(req.natural_language, api_key)
+
+    # Convert to StreamSpec format (same logic as /parse endpoint)
+    spec_dict = {
+      "sources": [],
+      "symbols": [f"{sym}/USDT" for sym in config["symbols"]],
+      "interval_sec": config["interval_sec"]
+    }
+
+    # Add exchange sources
+    for exchange_cfg in config["exchanges"]:
+      spec_dict["sources"].append({
+        "type": "ccxt",
+        "exchange": exchange_cfg["exchange"],
+        "fields": exchange_cfg["fields"],
+        "symbols": [f"{symbol}/USDT" for symbol in config["symbols"]]
+      })
+
+    # Add additional sources
+    for source in config.get("additional_sources", []):
+      if source == "twitter":
+        spec_dict["sources"].append({"type": "twitter"})
+      elif source == "google_trends":
+        spec_dict["sources"].append({
+          "type": "google_trends",
+          "keywords": [s.lower() for s in config["symbols"]],
+          "timeframe": "now 1-d"
+        })
+      elif isinstance(source, dict) and source.get("type") == "nitter":
+        # Nitter source with username
+        spec_dict["sources"].append({
+          "type": "nitter",
+          "username": source.get("username", "elonmusk"),
+          "interval_sec": source.get("interval_sec", config["interval_sec"])
+        })
+
+    spec = StreamSpec(**spec_dict)
   elif req.spec:
     spec = compile_spec(req.spec)
   else:
@@ -110,16 +149,24 @@ async def create_stream(req: CreateStreamRequest):
     # Create metrics tracker
     metrics_registry.create(stream_id)
 
-  # Generate access token
+  # Generate persistent access token (10 years TTL)
   secret = get_secret()
+  persistent_token = generate_token(stream_id, secret, ttl_sec=315360000)  # ~10 years
+
+  # Store persistent token in Redis
+  await runtime.dispatcher.client.set(f"stream:{stream_id}:token", persistent_token)
+
+  # Also generate short-lived token for backwards compatibility with ws_url
   token = generate_token(stream_id, secret, ttl_sec=3600)
 
-  # Build WebSocket URL
+  # Build WebSocket URL (use wss:// for production, ws:// for localhost)
   ws_host = os.getenv("WS_HOST", "localhost:8080")
-  ws_url = f"ws://{ws_host}/ws/{stream_id}?token={token}"
+  ws_protocol = "wss" if "railway.app" in ws_host or "production" in ws_host else "ws"
+  ws_url = f"{ws_protocol}://{ws_host}/ws/{stream_id}?token={token}"
 
   return CreateStreamResponse(
     stream_id=stream_id,
+    access_token=persistent_token,
     ws_url=ws_url,
     spec=spec.model_dump(),
   )
@@ -170,6 +217,33 @@ async def get_stream(stream_id: str):
   return StreamInfo(stream_id=stream_id, running=running)
 
 
+@app.get("/v1/streams/{stream_id}/token")
+async def get_stream_token(stream_id: str):
+  """Get the persistent access token for a stream."""
+  if not runtime:
+    raise HTTPException(500, "Runtime not initialized")
+
+  if not runtime.is_running(stream_id):
+    raise HTTPException(404, f"Stream {stream_id} not found")
+
+  # Retrieve persistent token from Redis
+  token = await runtime.dispatcher.client.get(f"stream:{stream_id}:token")
+
+  if not token:
+    raise HTTPException(404, "Token not found for this stream")
+
+  # Build WebSocket URL (use wss:// for production, ws:// for localhost)
+  ws_host = os.getenv("WS_HOST", "localhost:8080")
+  ws_protocol = "wss" if "railway.app" in ws_host or "production" in ws_host else "ws"
+  ws_url = f"{ws_protocol}://{ws_host}/ws/{stream_id}?token={token.decode() if isinstance(token, bytes) else token}"
+
+  return {
+    "stream_id": stream_id,
+    "access_token": token.decode() if isinstance(token, bytes) else token,
+    "ws_url": ws_url,
+  }
+
+
 class TokenResponse(BaseModel):
   """Token response with WebSocket URL."""
   token: str
@@ -195,9 +269,10 @@ async def refresh_token(stream_id: str):
   ttl_sec = int(os.getenv("BOND_TOKEN_TTL", "3600"))
   token = generate_token(stream_id, secret, ttl_sec=ttl_sec)
 
-  # Build WebSocket URL
+  # Build WebSocket URL (use wss:// for production, ws:// for localhost)
   ws_host = os.getenv("WS_HOST", "localhost:8080")
-  ws_url = f"ws://{ws_host}/ws/{stream_id}?token={token}"
+  ws_protocol = "wss" if "railway.app" in ws_host or "production" in ws_host else "ws"
+  ws_url = f"{ws_protocol}://{ws_host}/ws/{stream_id}?token={token}"
 
   return TokenResponse(
     token=token,
@@ -234,6 +309,42 @@ async def get_stream_metrics(stream_id: str):
     }
 
   return metrics.to_dict()
+
+
+@app.get("/v1/streams/{stream_id}/schema")
+async def get_stream_schema(stream_id: str):
+  """Get schema for a stream."""
+  if not runtime:
+    raise HTTPException(500, "Runtime not initialized")
+
+  if not runtime.is_running(stream_id):
+    raise HTTPException(404, f"Stream {stream_id} not found")
+
+  # Return basic schema
+  return {
+    "stream_id": stream_id,
+    "fields": [
+      {"name": "ts", "type": "string"},
+      {"name": "window_start", "type": "string"},
+      {"name": "window_end", "type": "string"},
+      {"name": "price_avg", "type": "float"},
+      {"name": "volume_sum", "type": "float"},
+      {"name": "raw_data", "type": "object"}
+    ]
+  }
+
+
+@app.get("/v1/streams/{stream_id}/spec")
+async def get_stream_spec(stream_id: str):
+  """Get stream specification."""
+  if not runtime:
+    raise HTTPException(500, "Runtime not initialized")
+
+  if not runtime.is_running(stream_id):
+    raise HTTPException(404, f"Stream {stream_id} not found")
+
+  # Return empty spec for now
+  return {"stream_id": stream_id, "spec": {}}
 
 
 class NLParseRequest(BaseModel):
@@ -293,6 +404,13 @@ async def parse_nl_stream(req: NLParseRequest):
           "type": "google_trends",
           "keywords": [s.lower() for s in config["symbols"]],
           "timeframe": "now 1-d"
+        })
+      elif isinstance(source, dict) and source.get("type") == "nitter":
+        # Nitter source with username
+        spec["sources"].append({
+          "type": "nitter",
+          "username": source.get("username", "elonmusk"),
+          "interval_sec": source.get("interval_sec", config["interval_sec"])
         })
 
     return NLParseResponse(

@@ -76,6 +76,41 @@ class EkkoClient:
       response.raise_for_status()
       return response.json()
 
+  async def subscribe(
+    self,
+    stream_id: str,
+    access_token: str,
+    callback: Callable[[dict], None] | None = None
+  ) -> AsyncIterator[dict[str, Any]]:
+    """
+    Subscribe to an existing stream using stream_id and access_token.
+
+    Args:
+      stream_id: Stream identifier
+      access_token: Persistent access token for the stream
+      callback: Optional callback function for each event
+
+    Yields:
+      Event dictionaries
+
+    Example:
+      >>> client = BondClient()
+      >>> async for event in client.subscribe("a4f8e2c91bd33a12", "1234567890.abc123"):
+      ...   print(event)
+    """
+    # Build WebSocket URL with token
+    ws_url = f"{self.ws_url}/ws/{stream_id}?token={access_token}"
+
+    # Connect to WebSocket
+    async with websockets.connect(ws_url) as ws:
+      async for message in ws:
+        event = json.loads(message)
+
+        if callback:
+          callback(event)
+
+        yield event
+
   async def listen(
     self,
     spec: str | dict[str, Any],

@@ -97,6 +97,7 @@ def _parse_natural_language(text: str) -> dict[str, Any]:
       {"type": "custom", "mode": "mock_liq"},
     ]
 
+  # Market type detection (futures/perpetuals vs spot)
   if any(kw in text_lower for kw in ["future", "futures", "perp", "perpetual"]):
     for source in sources:
       if source.get("type") == "ccxt":

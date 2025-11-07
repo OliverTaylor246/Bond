@@ -159,7 +159,7 @@ class MultiSourcePipeline:
       if event_ts and (self.latest_event_ts is None or event_ts > self.latest_event_ts):
         self.latest_event_ts = event_ts
 
-      if config.type == "twitter" or event.get("source") == "twitter":
+      if config.type == "twitter" or config.type == "nitter" or event.get("source") == "twitter" or (event.get("source") and event.get("source").startswith("nitter")):
         self.social_buffer.append(event)
       elif "price" in event:
         self.trade_buffer.append(event)
@@ -288,6 +288,19 @@ class MultiSourcePipeline:
     ]
     onchain_value_sum = sum(onchain_values) if onchain_values else None
 
+    # Include raw tweet data if present
+    tweet_data = None
+    if tweet_events:
+      latest_tweet = tweet_events[-1]  # Get most recent tweet
+      if latest_tweet.get('event_type') == 'tweet':
+        tweet_data = {
+          'text': latest_tweet.get('text'),
+          'timestamp_posted': latest_tweet.get('timestamp_posted'),
+          'stats': latest_tweet.get('stats'),
+          'symbol': latest_tweet.get('symbol'),
+          'event_type': 'tweet',
+        }
+
     agg_event = AggregatedEvent(
       ts=latest_ts,
       window_start=latest_ts - timedelta(seconds=self.interval_sec),
@@ -311,6 +324,7 @@ class MultiSourcePipeline:
         "exchange_data": exchange_data,
         "symbols": symbols_seen,
         "volume_base_sum": base_volume_sum,
+        "tweet_data": tweet_data,
       },
     )
 

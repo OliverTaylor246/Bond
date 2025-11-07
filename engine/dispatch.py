@@ -18,7 +18,9 @@ class RedisDispatcher:
 
   async def connect(self) -> None:
     """Establish Redis connection."""
-    self.client = await redis.from_url(self.redis_url, decode_responses=True)
+    self.client = redis.from_url(self.redis_url, decode_responses=True)
+    # Prime the connection so startup fails fast if Redis is unreachable.
+    await self.client.ping()
 
   async def disconnect(self) -> None:
     """Close Redis connection."""

@@ -1,6 +1,4 @@
-# Docker Compose for bond development environment
-# SIMPLIFIED FOR DEV ONLY - not production configuration
-
+# Docker Compose for Railway deployment
 version: '3.8'
 
 services:
@@ -19,38 +17,31 @@ services:
 
   api:
     build:
-      context: ..
+      context: .
       dockerfile: infra/Dockerfile.api
     ports:
       - "8000:8000"
-    env_file:
-      - ../.env
     environment:
       - REDIS_URL=redis://redis:6379
-      - WS_HOST=localhost:8080
-      - BOND_SECRET=${BOND_SECRET:-bond-dev-secret-change-in-production}
+      - WS_HOST=${RAILWAY_PUBLIC_DOMAIN:-localhost:8080}
+      - BOND_SECRET=${BOND_SECRET}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
     depends_on:
       redis:
         condition: service_healthy
-    volumes:
-      - ..:/app
-    command: uvicorn apps.api.main:app --host 0.0.0.0 --port 8000 --reload
 
   broker:
     build:
-      context: ..
+      context: .
       dockerfile: infra/Dockerfile.broker
     ports:
       - "8080:8080"
     environment:
       - REDIS_URL=redis://redis:6379
-      - BOND_SECRET=${BOND_SECRET:-bond-dev-secret-change-in-production}
+      - BOND_SECRET=${BOND_SECRET}
     depends_on:
       redis:
         condition: service_healthy
-    volumes:
-      - ..:/app
-    command: uvicorn apps.broker.broker:app --host 0.0.0.0 --port 8080
 
 volumes:
   redis_data:
