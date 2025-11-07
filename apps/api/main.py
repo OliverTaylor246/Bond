@@ -92,6 +92,7 @@ async def create_stream(req: CreateStreamRequest):
 
   # Compile spec
   if req.natural_language:
+<<<<<<< HEAD
     # Use DeepSeek NL parser instead of basic parser
     api_key = os.getenv("DEEPSEEK_API_KEY")
     if not api_key:
@@ -135,6 +136,14 @@ async def create_stream(req: CreateStreamRequest):
         })
 
     spec = StreamSpec(**spec_dict)
+=======
+    spec = compile_spec(req.natural_language)
+    print(
+      "[api] NL request parsed to StreamSpec:",
+      spec.model_dump(),
+      flush=True,
+    )
+>>>>>>> origin/UI
   elif req.spec:
     spec = compile_spec(req.spec)
   else:

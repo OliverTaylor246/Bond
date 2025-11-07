@@ -7,7 +7,11 @@ from typing import Dict, Any
 AVAILABLE_OPTIONS = {
     "symbols": "any cryptocurrency symbol (e.g., BTC, ETH, SOL, AVAX, MATIC, LINK, UNI, DOGE, ADA, DOT, AAVE, CRV, SUSHI, COMP, MKR, YFI, SNX, etc.)",
     "popular_symbols": ["BTC", "ETH", "SOL"],  # Limited to top 3 - broker can't handle more concurrent WebSocket streams
+<<<<<<< HEAD
+    "exchanges": ["binanceus", "binance"],
+=======
     "exchanges": ["binanceus", "binance", "kraken", "kucoin"],
+>>>>>>> origin/UI
     "fields": ["price", "bid", "ask", "high", "low", "open", "close", "volume"],
     "sources": ["twitter", "onchain", "liquidations", "google_trends", "nitter"],
     "twitter_users": ["elonmusk", "vitalikbuterin", "cz_binance", "SBF_FTX", "APompliano"],
