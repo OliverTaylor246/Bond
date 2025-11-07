@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 from typing import Any
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel, Field, ValidationError
 from apps.compiler import compile_spec, generate_stream_id
 from apps.runtime import StreamRuntime
@@ -117,9 +117,24 @@ async def _build_stream_response(stream_id: str, spec: StreamSpec) -> CreateStre
   )
 
 
+@app.get("/login")
+async def login_page():
+  """Serve the login page."""
+  return FileResponse("/app/apps/api/static/login.html")
+
+
 @app.get("/")
-async def root():
-  """Serve the UI."""
+async def root(request: Request):
+  """Serve the UI - require authentication."""
+  # Check for auth tokens in query params (from Echo_Website)
+  access_token = request.query_params.get('access_token')
+  refresh_token = request.query_params.get('refresh_token')
+
+  if access_token and refresh_token:
+    # Redirect to login page with tokens for validation
+    return RedirectResponse(url=f"/login?access_token={access_token}&refresh_token={refresh_token}")
+
+  # Allow access without auth for now
   return FileResponse("/app/apps/api/static/index.html")
 
 

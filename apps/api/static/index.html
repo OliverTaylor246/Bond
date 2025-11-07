@@ -887,6 +887,11 @@
       <a class="nav-link" href="https://docs.example.com" target="_blank" rel="noreferrer">Docs</a>
       <button class="nav-link" id="toolbarSettings">Settings</button>
       <button class="primary" id="toolbarNew">New Stream</button>
+      <div id="auth-status" style="margin-left: 16px; display: none; align-items: center; gap: 8px;">
+        <span id="user-email-display" style="color: var(--text-muted); font-size: 13px;"></span>
+        <button id="logout-btn" style="border: 1px solid rgba(148,163,184,0.35); background: rgba(148,163,184,0.12); color: var(--text); font-size: 12px; padding: 6px 12px; border-radius: 8px; cursor: pointer;">Sign Out</button>
+      </div>
+      <a id="login-link" href="/login" style="margin-left: 16px; display: none; border: 1px solid rgba(59,130,246,0.35); background: rgba(59,130,246,0.15); color: var(--text); font-size: 13px; padding: 6px 12px; border-radius: 8px; text-decoration: none;">Sign In</a>
     </div>
   </header>
 
@@ -2379,9 +2384,55 @@
 
     appendMessage('agent', `Echo Agent ready.
     <div style="margin-top:12px;font-size:12px;color:var(--text-muted);">
-      Try: “Stream BTC/USDT every 5 seconds.”
+      Try: "Stream BTC/USDT every 5 seconds."
       <br/>Move over to Streams whenever you want to inspect or tweak an active feed.
     </div>`);
+  </script>
+
+  <!-- Supabase Auth -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script>
+    const SUPABASE_URL = 'https://eezdrsmjpycrzuriyzni.supabase.co';
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVlemRyc21qcHljcnp1cml5em5pIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI1MDQ1NTgsImV4cCI6MjA3ODA4MDU1OH0.kBl6L1pnX1OnNbTYURcNfijIK8Oqq4xfjXECwLLm_4o';
+
+    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    const authStatus = document.getElementById('auth-status');
+    const loginLink = document.getElementById('login-link');
+    const userEmailDisplay = document.getElementById('user-email-display');
+    const logoutBtn = document.getElementById('logout-btn');
+
+    // Check auth status on page load
+    async function checkAuthStatus() {
+      const { data: { session } } = await supabase.auth.getSession();
+
+      if (session) {
+        // User is logged in
+        userEmailDisplay.textContent = session.user.email;
+        authStatus.style.display = 'flex';
+        loginLink.style.display = 'none';
+      } else {
+        // User is not logged in
+        authStatus.style.display = 'none';
+        loginLink.style.display = 'inline-flex';
+      }
+    }
+
+    // Handle logout
+    if (logoutBtn) {
+      logoutBtn.addEventListener('click', async () => {
+        await supabase.auth.signOut();
+        window.location.href = '/login';
+      });
+    }
+
+    // Initialize auth status
+    checkAuthStatus();
+
+    // Listen for auth changes
+    supabase.auth.onAuthStateChange((event, session) => {
+      checkAuthStatus();
+    });
   </script>
 </body>
 </html>
