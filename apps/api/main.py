@@ -103,14 +103,15 @@ async def login_page():
 @app.get("/")
 async def root(request: Request):
   """Serve the UI - require authentication."""
-  # Check for auth token in query params (from Echo_Website)
-  auth_token = request.query_params.get('auth_token')
+  # Check for auth tokens in query params (from Echo_Website)
+  access_token = request.query_params.get('access_token')
+  refresh_token = request.query_params.get('refresh_token')
 
-  if auth_token:
-    # Redirect to login page with token for validation
-    return RedirectResponse(url=f"/login?auth_token={auth_token}")
+  if access_token and refresh_token:
+    # Redirect to login page with tokens for validation
+    return RedirectResponse(url=f"/login?access_token={access_token}&refresh_token={refresh_token}")
 
-  # For now, allow access without auth (will add proper auth check later)
+  # Allow access without auth for now
   return FileResponse("/app/apps/api/static/index.html")
 
 

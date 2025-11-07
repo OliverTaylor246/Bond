@@ -187,34 +187,32 @@
       }
     }
 
-    // Check for auth token in URL (from Echo_Website)
+    // Check for auth tokens in URL (from Echo_Website)
     async function checkUrlToken() {
       const urlParams = new URLSearchParams(window.location.search);
-      const authToken = urlParams.get('auth_token');
+      const accessToken = urlParams.get('access_token');
+      const refreshToken = urlParams.get('refresh_token');
 
-      if (authToken) {
+      if (accessToken && refreshToken) {
         showMessage('Validating session...', 'success');
         try {
-          // Validate token with Supabase
-          const { data: { user }, error } = await supabase.auth.getUser(authToken);
+          // Set session with both tokens
+          const { data, error } = await supabase.auth.setSession({
+            access_token: accessToken,
+            refresh_token: refreshToken
+          });
 
           if (error) throw error;
 
-          if (user) {
-            // Set session
-            await supabase.auth.setSession({
-              access_token: authToken,
-              refresh_token: '' // We don't have refresh token from URL
-            });
-
+          if (data.session) {
             showMessage('Login successful! Redirecting...', 'success');
             setTimeout(() => {
               window.location.href = '/';
-            }, 1000);
+            }, 500);
           }
         } catch (err) {
-          showMessage('Invalid session token. Please log in.', 'error');
-          // Clear URL parameter
+          showMessage('Invalid session tokens. Please log in.', 'error');
+          // Clear URL parameters
           window.history.replaceState({}, document.title, window.location.pathname);
         }
       }
