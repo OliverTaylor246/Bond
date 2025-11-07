@@ -18,7 +18,7 @@ from connectors.onchain_grpc import onchain_stream
 from connectors.google_trends_stream import google_trends_stream
 from connectors.nitter_playwright import nitter_playwright_stream
 
-BASE_EXCHANGE_PREFERENCE = ["binance", "binanceus", "kraken", "kucoin"]
+BASE_EXCHANGE_PREFERENCE = ["binanceus", "binance"]
 
 
 class StreamRuntime:
@@ -170,7 +170,11 @@ class StreamRuntime:
 
       def on_failure(err: Exception) -> None:
         previous = current_exchange()
-        state["idx"] = (state["idx"] + 1) % len(candidates)
+        err_str = str(err).lower()
+        if "451" in err_str or "restricted" in err_str:
+          state["idx"] = min(state["idx"] + 1, len(candidates) - 1)
+        else:
+          state["idx"] = (state["idx"] + 1) % len(candidates)
         new_exchange = current_exchange()
         metadata["active_exchange"] = new_exchange
         if new_exchange != previous:
@@ -381,12 +385,12 @@ class StreamRuntime:
           if ex_lower not in preference:
             preference.append(ex_lower)
 
-    for ex in BASE_EXCHANGE_PREFERENCE:
-      if ex not in preference:
-        preference.append(ex)
-
-    if "kraken" not in preference:
-      preference.append("kraken")
+    if not preference:
+      preference.extend(BASE_EXCHANGE_PREFERENCE)
+    else:
+      for ex in BASE_EXCHANGE_PREFERENCE:
+        if ex not in preference:
+          preference.append(ex)
 
     return preference
 

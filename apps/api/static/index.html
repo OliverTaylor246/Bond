@@ -562,60 +562,26 @@
     });
 
     function renderParseSummary(parsed, bubble) {
-      const nitterSources = parsed.spec.sources.filter(src => src.type === 'nitter');
-      const ccxtSources = parsed.spec.sources.filter(src => src.type === 'ccxt');
-
-      let tableHtml = '';
-
-      if (nitterSources.length > 0) {
-        // Twitter/Nitter stream preview
-        const nitterRows = nitterSources.map(src => `
-          <tr>
-            <td>${escapeHtml(src.username || 'user')}</td>
-            <td>Latest tweet</td>
-            <td>${src.interval_sec || parsed.spec.interval_sec || 60}s</td>
-          </tr>
-        `).join('');
-
-        tableHtml = `
-          <table style="margin-top:12px;border-collapse:collapse;width:100%;font-size:12px;">
-            <thead>
-              <tr style="background:rgba(59,130,246,0.18);">
-                <th style="padding:6px 8px;text-align:left;border:1px solid rgba(59,130,246,0.15);">Username</th>
-                <th style="padding:6px 8px;text-align:left;border:1px solid rgba(59,130,246,0.15);">Content</th>
-                <th style="padding:6px 8px;text-align:left;border:1px solid rgba(59,130,246,0.15);">Interval</th>
-              </tr>
-            </thead>
-            <tbody>${nitterRows}</tbody>
-          </table>`;
-      } else if (ccxtSources.length > 0) {
-        // CCXT crypto stream preview
-        const ccxtRows = ccxtSources.map(src => `
-          <tr>
-            <td>${escapeHtml((src.exchange || 'BINANCEUS').toUpperCase())}</td>
-            <td>${escapeHtml((src.symbols || []).join(', '))}</td>
-            <td>${escapeHtml((src.fields || []).join(', ') || 'price, volume')}</td>
-          </tr>
-        `).join('');
-
-        tableHtml = `
-          <table style="margin-top:12px;border-collapse:collapse;width:100%;font-size:12px;">
-            <thead>
-              <tr style="background:rgba(59,130,246,0.18);">
-                <th style="padding:6px 8px;text-align:left;border:1px solid rgba(59,130,246,0.15);">Exchange</th>
-                <th style="padding:6px 8px;text-align:left;border:1px solid rgba(59,130,246,0.15);">Symbols</th>
-                <th style="padding:6px 8px;text-align:left;border:1px solid rgba(59,130,246,0.15);">Fields</th>
-              </tr>
-            </thead>
-            <tbody>${ccxtRows}</tbody>
-          </table>`;
-      } else {
-        tableHtml = '<div style="padding:8px;color:#f87171;">No sources detected.</div>';
-      }
+      const rows = parsed.spec.sources.filter(src => src.type === 'ccxt').map(src => `
+        <tr>
+          <td>${escapeHtml((src.exchange || 'BINANCEUS').toUpperCase())}</td>
+          <td>${escapeHtml((src.symbols || []).join(', '))}</td>
+          <td>${escapeHtml((src.fields || []).join(', ') || 'price, volume')}</td>
+        </tr>
+      `).join('');
 
       bubble.innerHTML = `
-        <div>Here's the stream I can create:</div>
-        ${tableHtml}
+        <div>Here’s the stream I can create:</div>
+        <table style="margin-top:12px;border-collapse:collapse;width:100%;font-size:12px;">
+          <thead>
+            <tr style="background:rgba(59,130,246,0.18);">
+              <th style="padding:6px 8px;text-align:left;border:1px solid rgba(59,130,246,0.15);">Exchange</th>
+              <th style="padding:6px 8px;text-align:left;border:1px solid rgba(59,130,246,0.15);">Symbols</th>
+              <th style="padding:6px 8px;text-align:left;border:1px solid rgba(59,130,246,0.15);">Fields</th>
+            </tr>
+          </thead>
+          <tbody>${rows || '<tr><td colspan="3" style="padding:8px;color:#f87171;">No CCXT source detected.</td></tr>'}</tbody>
+        </table>
         <div style="margin-top:12px;display:flex;gap:10px;">
           <button id="confirmLaunchBtn" style="border:1px solid rgba(59,130,246,0.35);background:rgba(59,130,246,0.15);color:#dbeafe;padding:8px 12px;border-radius:10px;font-size:12px;cursor:pointer;">Launch</button>
           <button id="cancelLaunchBtn" style="border:1px solid rgba(148,163,184,0.35);background:rgba(148,163,184,0.12);color:#cbd5f5;padding:8px 12px;border-radius:10px;font-size:12px;cursor:pointer;">Modify</button>
@@ -633,7 +599,7 @@
           if (!response.ok) throw new Error(await response.text());
           const stream = await response.json();
           bubble.innerHTML = `Stream <code>${escapeHtml(stream.stream_id)}</code> started.`;
-          addSession(stream.stream_id, stream.ws_url, parsed.spec, stream.access_token);
+          addSession(stream.stream_id, stream.ws_url, parsed.spec);
           loadStream(stream.stream_id);
         } catch (err) {
           bubble.innerHTML = `Failed to launch: ${escapeHtml(err.message)}`;
@@ -645,12 +611,11 @@
       });
     }
 
-    function addSession(streamId, wsUrl, spec, accessToken) {
+    function addSession(streamId, wsUrl, spec) {
       activeStreams.set(streamId, {
         streamId,
         wsUrl,
         spec,
-        accessToken,
         metrics: null,
         schema: null,
         derivedSchema: null,
@@ -699,13 +664,6 @@
               entry.priceHistory.push(price);
               if (entry.priceHistory.length > 120) entry.priceHistory.shift();
             }
-
-            // Store tweet data if present
-            const tweetData = payload.raw_data?.tweet_data;
-            if (tweetData && tweetData.text) {
-              entry.latestTweet = tweetData;
-            }
-
             if (!entry.schema) {
               entry.derivedSchema = deriveSchemaFromEvent(payload);
             }
@@ -833,42 +791,28 @@
       streamStatus.className = 'status-pill ' + (stream.status.toUpperCase().includes('STOP') ? 'error' : stream.status.toUpperCase().includes('PAUSE') ? 'warn' : '');
 
       const schemaToRender = getDisplaySchema(stream);
-      const hasCCXTSource = (stream.spec.sources || []).some(s => s.type === 'ccxt');
-      const hasNitterSource = (stream.spec.sources || []).some(s => s.type === 'nitter');
 
       detailBody.innerHTML = `
         <div class="panel">
           <h3>Stream Metadata</h3>
           <dl>
             <dt>Stream ID</dt><dd>${escapeHtml(stream.streamId)}</dd>
-            ${stream.accessToken ? `<dt>Access Token</dt><dd style="font-family:var(--mono);font-size:11px;word-break:break-all;">${escapeHtml(stream.accessToken)}</dd>` : ''}
             <dt>Status</dt><dd>${escapeHtml(stream.status)}</dd>
             <dt>Interval</dt><dd>${interval}s</dd>
             <dt>Latency</dt><dd>${latency}</dd>
             <dt>Created</dt><dd>${created ? created.toISOString() : '—'}</dd>
-            ${(stream.spec.symbols && stream.spec.symbols.length > 0) ? `<dt>Symbols</dt><dd>${escapeHtml(stream.spec.symbols.join(', '))}</dd>` : ''}
+            <dt>Symbols</dt><dd>${escapeHtml((stream.spec.symbols || []).join(', '))}</dd>
             <dt>Sources</dt><dd>${escapeHtml((stream.spec.sources || []).map(s => s.type).join(', '))}</dd>
-            ${hasCCXTSource ? `<dt>Exchanges</dt><dd>${escapeHtml((stream.spec.sources || []).flatMap(s => s.exchange ? [s.exchange.toUpperCase()] : []).join(', ') || 'BINANCEUS')}</dd>` : ''}
-            ${hasCCXTSource ? `<dt>Driver Stream</dt><dd>CCXT</dd>` : ''}
+            <dt>Exchanges</dt><dd>${escapeHtml((stream.spec.sources || []).flatMap(s => s.exchange ? [s.exchange.toUpperCase()] : []).join(', ') || 'BINANCEUS')}</dd>
+            <dt>Driver Stream</dt><dd>CCXT</dd>
             <dt>Type</dt><dd>AggregatedEvent</dd>
-            ${hasCCXTSource && latestPrice != null ? `<dt>Last price</dt><dd>$${latestPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</dd>` : ''}
+            <dt>Last price</dt><dd>${latestPrice != null ? '$' + latestPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'}</dd>
           </dl>
         </div>
         <div class="panel">
           <h3>Data Schema</h3>
           <div style="max-height:220px;overflow:auto;font-family:var(--mono);font-size:12px;border:1px solid rgba(59,130,246,0.15);border-radius:10px;padding:10px;background:rgba(8,13,23,0.95);">
-            ${hasNitterSource && !hasCCXTSource ? `
-              <div>ts: string</div>
-              <div>window_start: string</div>
-              <div>window_end: string</div>
-              <div>tweets: int</div>
-              <div>raw_data: object</div>
-              <div style="padding-left:16px;">├─ tweet_data: object (optional)</div>
-              <div style="padding-left:32px;">├─ text: string</div>
-              <div style="padding-left:32px;">├─ symbol: string (username)</div>
-              <div style="padding-left:32px;">├─ timestamp_posted: string</div>
-              <div style="padding-left:32px;">└─ event_type: "tweet"</div>
-            ` : Object.entries(schemaToRender || {}).map(([field, meta]) => {
+            ${Object.entries(schemaToRender || {}).map(([field, meta]) => {
               if (typeof meta === 'string') {
                 return `<div>${escapeHtml(field)}: ${escapeHtml(meta)}</div>`;
               }
@@ -916,21 +860,6 @@
             <button class="action-btn" onclick="exportData('${stream.streamId}', 'parquet')">Export Parquet</button>
           </div>
         </div>
-        ${stream.latestTweet ? `
-        <div class="panel column-merge">
-          <h3>Latest Tweet from @${escapeHtml(stream.latestTweet.symbol || 'user').toLowerCase()}</h3>
-          <div style="background:rgba(8,13,23,0.95);border:1px solid rgba(59,130,246,0.15);border-radius:12px;padding:16px;">
-            <div style="font-size:14px;line-height:1.6;color:var(--text);white-space:pre-wrap;word-break:break-word;">
-              ${escapeHtml(stream.latestTweet.text)}
-            </div>
-            ${stream.latestTweet.timestamp_posted ? `
-              <div style="margin-top:12px;font-size:12px;color:var(--text-muted);font-family:var(--mono);">
-                Posted: ${escapeHtml(stream.latestTweet.timestamp_posted)}
-              </div>
-            ` : ''}
-          </div>
-        </div>
-        ` : ''}
         <div class="panel">
           <h3>Actions</h3>
           <div class="actions-list">
@@ -1233,7 +1162,7 @@
       }
     });
 
-    appendMessage('agent', `3KK0 Agent Ready.
+    appendMessage('agent', `Bond Agent ready.
     <div style="margin-top:12px;font-size:12px;color:var(--text-muted);">
       Try: “Stream BTC/USDT every 5 seconds.”
     </div>`);

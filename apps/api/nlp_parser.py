@@ -7,7 +7,7 @@ from typing import Dict, Any
 AVAILABLE_OPTIONS = {
     "symbols": "any cryptocurrency symbol (e.g., BTC, ETH, SOL, AVAX, MATIC, LINK, UNI, DOGE, ADA, DOT, AAVE, CRV, SUSHI, COMP, MKR, YFI, SNX, etc.)",
     "popular_symbols": ["BTC", "ETH", "SOL"],  # Limited to top 3 - broker can't handle more concurrent WebSocket streams
-    "exchanges": ["binanceus", "binance"],
+    "exchanges": ["binanceus", "binance", "kraken", "kucoin"],
     "fields": ["price", "bid", "ask", "high", "low", "open", "close", "volume"],
     "sources": ["twitter", "onchain", "liquidations", "google_trends", "nitter"],
     "twitter_users": ["elonmusk", "vitalikbuterin", "cz_binance", "SBF_FTX", "APompliano"],
@@ -61,7 +61,7 @@ Return ONLY a JSON object with this structure:
 Rules:
 1. You can use ANY cryptocurrency symbol (BTC, ETH, LINK, AAVE, CRV, etc.) - not limited to the popular list
 2. If user says "all crypto" or "all cryptocurrencies" or "all available" -> use the popular symbols list: {', '.join(AVAILABLE_OPTIONS['popular_symbols'])}
-3. If user doesn't specify exchange, use ALL available exchanges
+3. If user doesn't specify exchange, use Binance US
 4. If user doesn't specify fields, use ["price", "volume"] as defaults
 5. If user says "realtime" or "fast" or "fastest", use interval 0.1
 6. If user says "live", "right now", "current" -> use 1 second interval
@@ -80,25 +80,35 @@ Rules:
 
 Return valid JSON only, no markdown formatting."""
 
+    print("[nlp_parser] Prompt submitted:", user_input, flush=True)
+
+    request_payload = {
+        "model": "deepseek-chat",
+        "messages": [
+            {"role": "user", "content": prompt}
+        ],
+        "temperature": 0.3,
+        "max_tokens": 1024
+    }
+
     async with httpx.AsyncClient(timeout=30.0) as client:
+        print(
+            "[nlp_parser] API call -> POST https://api.deepseek.com/v1/chat/completions",
+            flush=True,
+        )
         response = await client.post(
             "https://api.deepseek.com/v1/chat/completions",
             headers={
                 "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json"
             },
-            json={
-                "model": "deepseek-chat",
-                "messages": [
-                    {"role": "user", "content": prompt}
-                ],
-                "temperature": 0.3,
-                "max_tokens": 1024
-            }
+            json=request_payload
         )
 
         response.raise_for_status()
         result = response.json()
+
+        print("[nlp_parser] API response:", result, flush=True)
 
         response_text = result["choices"][0]["message"]["content"].strip()
 
@@ -110,4 +120,5 @@ Return valid JSON only, no markdown formatting."""
                 response_text = response_text[4:].strip()
 
         config = json.loads(response_text)
+        print("[nlp_parser] Parsed configuration:", config, flush=True)
         return config

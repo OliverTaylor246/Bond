@@ -9,7 +9,7 @@ import ccxt
 from engine.schemas import TradeEvent
 
 
-EXCHANGES = ["kraken", "kucoin"]  # coinbase requires API keys
+EXCHANGES = ["binanceus", "binance"]  # coinbase requires API keys
 
 
 async def ccxt_poll_stream(
