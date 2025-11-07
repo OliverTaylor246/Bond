@@ -18,6 +18,11 @@ redis[hiredis]==5.0.1
 # HTTP client
 httpx==0.26.0
 
+# HTML parsing / headless browser
+beautifulsoup4==4.12.3
+lxml==4.9.4
+playwright==1.47.0
+
 # Google Trends
 pytrends==4.9.2
 
