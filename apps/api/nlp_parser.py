@@ -14,7 +14,7 @@ AVAILABLE_OPTIONS = {
     "popular_symbols": ["BTC", "ETH", "SOL"],  # Limited to top 3 - broker can't handle more concurrent WebSocket streams
     "exchanges": ["binanceus", "binance", "kraken", "kucoin"],
     "fields": ["price", "bid", "ask", "high", "low", "open", "close", "volume"],
-    "sources": ["twitter", "onchain", "liquidations", "google_trends", "nitter"],
+    "sources": ["twitter", "onchain", "liquidations", "google_trends", "nitter", "polymarket"],
     "twitter_users": ["elonmusk", "vitalikbuterin", "cz_binance", "SBF_FTX", "APompliano"],
     "intervals": {
         "realtime": 0.5,
@@ -82,6 +82,7 @@ _RULES = """1. Use any cryptocurrency ticker the user mentions (convert names to
 12. Always return compliant JSON with keys: symbols, exchanges, additional_sources, interval_sec, reasoning.
 13. When an existing stream spec is provided, start from it and only change the parts the user requested—preserve other symbols, sources, and intervals.
 14. Treat additive requests ("add tweets", "include Google Trends") as augmentations unless the user explicitly asks to replace or remove sources.
+15. Mentioning "Polymarket", "prediction markets", or "event odds" adds a polymarket source (track all events by default unless the user specifies filters).
 """
 
 _AVAILABLE_OPTIONS_TEXT = f"""- Symbols: {AVAILABLE_OPTIONS['symbols']}

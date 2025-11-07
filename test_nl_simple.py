@@ -8,7 +8,7 @@ AVAILABLE_OPTIONS = {
     "symbols": ["BTC", "ETH", "SOL", "AVAX", "MATIC", "LINK", "UNI", "DOGE", "ADA", "DOT"],
     "exchanges": ["kraken", "kucoin"],
     "fields": ["price", "bid", "ask", "high", "low", "open", "close", "volume"],
-    "sources": ["twitter", "onchain", "liquidations", "google_trends"]
+    "sources": ["twitter", "onchain", "liquidations", "google_trends", "nitter", "polymarket"]
 }
 
 async def test_parse(query: str, api_key: str):

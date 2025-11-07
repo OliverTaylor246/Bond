@@ -10,6 +10,7 @@ from playwright.async_api import async_playwright
 
 NITTER_INSTANCE = "nitter.poast.org"
 
+#DO NOT TAKE THE FIRST TWEET AS NEW - SORT BY DATETIME (BECAUSE OF PINNED)
 
 async def fetch_latest_tweet_playwright(username: str, page) -> dict | None:
     """

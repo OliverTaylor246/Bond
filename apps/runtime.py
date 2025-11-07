@@ -3,6 +3,10 @@ Runtime manager - orchestrates live stream pipelines.
 Manages lifecycle of running streams (start, stop, health checks).
 """
 import asyncio
+import contextlib
+import json
+import os
+import time
 from typing import Any
 from engine.schemas import StreamSpec
 from engine.pipeline_three import MultiSourcePipeline, SourceConfig
@@ -17,6 +21,7 @@ from connectors.custom_ws import custom_stream
 from connectors.onchain_grpc import onchain_stream
 from connectors.google_trends_stream import google_trends_stream
 from connectors.nitter_playwright import nitter_playwright_stream
+from connectors.polymarket_stream import polymarket_events_stream
 
 BASE_EXCHANGE_PREFERENCE = ["binanceus", "binance"]
 
@@ -29,10 +34,18 @@ class StreamRuntime:
     self.active_streams: dict[str, asyncio.Task] = {}
     self.dispatcher = RedisDispatcher(redis_url)
     self.stream_specs: dict[str, StreamSpec] = {}
+    self.heartbeat_tasks: dict[str, asyncio.Task] = {}
+    self.cleanup_task: asyncio.Task | None = None
+    self.stream_ttls: dict[str, int] = {}
+    self.default_ttl = int(os.getenv("STREAM_DEFAULT_TTL_SEC", "600"))
+    self.heartbeat_interval = int(os.getenv("STREAM_HEARTBEAT_INTERVAL_SEC", "30"))
+    self.stale_threshold = int(os.getenv("STREAM_STALE_THRESHOLD_SEC", "120"))
+    self.cleanup_interval = int(os.getenv("STREAM_CLEANUP_INTERVAL_SEC", "30"))
 
   async def start(self) -> None:
     """Initialize runtime and connect to Redis."""
     await self.dispatcher.connect()
+    self.cleanup_task = asyncio.create_task(self._cleanup_worker())
 
   async def stop(self) -> None:
     """Shutdown all streams and disconnect."""
@@ -42,6 +55,19 @@ class StreamRuntime:
 
     await asyncio.gather(*self.active_streams.values(), return_exceptions=True)
     self.active_streams.clear()
+
+    # Cancel heartbeat tasks
+    for hb in self.heartbeat_tasks.values():
+      hb.cancel()
+    await asyncio.gather(*self.heartbeat_tasks.values(), return_exceptions=True)
+    self.heartbeat_tasks.clear()
+    self.stream_ttls.clear()
+
+    if self.cleanup_task:
+      self.cleanup_task.cancel()
+      with contextlib.suppress(asyncio.CancelledError):
+        await self.cleanup_task
+      self.cleanup_task = None
 
     await self.dispatcher.disconnect()
 
@@ -59,9 +85,15 @@ class StreamRuntime:
     # Track spec for later inspection/restart
     self.stream_specs[stream_id] = spec
 
+    ttl = await self._register_stream_metadata(stream_id, spec)
+
     # Create task for this stream
     task = asyncio.create_task(self._run_stream(stream_id, spec))
     self.active_streams[stream_id] = task
+
+    hb_task = asyncio.create_task(self._heartbeat_loop(stream_id))
+    self.heartbeat_tasks[stream_id] = hb_task
+    self.stream_ttls[stream_id] = ttl
 
   async def _run_stream(self, stream_id: str, spec: StreamSpec) -> None:
     """
@@ -325,6 +357,58 @@ class StreamRuntime:
         )
       )
 
+    def add_polymarket_source(source_cfg: dict) -> None:
+      def as_str_list(value: Any) -> list[str]:
+        if isinstance(value, str) and value.strip():
+          return [value.strip()]
+        if isinstance(value, list):
+          return [str(item).strip() for item in value if isinstance(item, str) and item.strip()]
+        return []
+
+      event_ids = as_str_list(source_cfg.get("event_ids"))
+      categories = as_str_list(source_cfg.get("categories"))
+      tag = source_cfg.get("tag")
+      if isinstance(tag, str):
+        tag = tag.strip() or None
+      include_closed = bool(source_cfg.get("include_closed", False))
+      active_only = bool(source_cfg.get("active_only", True))
+      interval_override = int(source_cfg.get("interval_sec") or max(interval, 30))
+      interval_override = max(15, interval_override)
+      limit = int(source_cfg.get("limit") or 100)
+
+      def create_stream():
+        print(
+          "[runtime] Starting Polymarket stream "
+          f"(events={event_ids or 'all'}, categories={categories or 'all'})",
+          flush=True,
+        )
+        return polymarket_events_stream(
+          event_ids=list(event_ids) or None,
+          categories=list(categories) or None,
+          tags=[tag] if tag else None,
+          include_closed=include_closed,
+          active_only=active_only,
+          interval=interval_override,
+          limit=limit,
+        )
+
+      pipeline_sources.append(
+        SourceConfig(
+          name=next_name("polymarket"),
+          type="polymarket",
+          create_stream=create_stream,
+          metadata={
+            "event_ids": list(event_ids),
+            "categories": list(categories),
+            "tag": tag,
+            "include_closed": include_closed,
+            "active_only": active_only,
+            "interval_sec": interval_override,
+            "limit": limit,
+          },
+        )
+      )
+
     handlers = {
       "ccxt": add_ccxt_source,
       "twitter": add_twitter_source,
@@ -333,6 +417,7 @@ class StreamRuntime:
       "onchain.grpc": add_onchain_source,
       "custom": add_custom_source,
       "nitter": add_nitter_source,
+      "polymarket": add_polymarket_source,
     }
 
     for source in spec.sources:
@@ -417,6 +502,7 @@ class StreamRuntime:
       pass
 
     self.active_streams.pop(stream_id, None)
+    await self._deregister_stream(stream_id)
     if not preserve_spec:
       self.stream_specs.pop(stream_id, None)
 
@@ -467,3 +553,107 @@ class StreamRuntime:
     if not spec:
       raise ValueError(f"Spec for stream {stream_id} not found")
     return spec
+
+  async def _register_stream_metadata(self, stream_id: str, spec: StreamSpec) -> int:
+    client = self.dispatcher.client
+    if not client:
+      return self.default_ttl
+
+    ttl = int(spec.ttl_sec or self.default_ttl)
+    ttl = max(ttl, self.heartbeat_interval * 2)
+    config_key = f"stream:{stream_id}:config"
+    heartbeat_key = f"stream:{stream_id}:last_heartbeat"
+    payload = json.dumps(spec.model_dump())
+    now = time.time()
+
+    await client.sadd("active_streams", stream_id)
+    await client.set(config_key, payload, ex=ttl)
+    await client.set(heartbeat_key, str(now), ex=ttl)
+
+    return ttl
+
+  async def _touch_stream(self, stream_id: str, ttl: int | None = None) -> None:
+    client = self.dispatcher.client
+    if not client:
+      return
+    ttl = ttl or self.stream_ttls.get(stream_id, self.default_ttl)
+    ttl = max(ttl, self.heartbeat_interval * 2)
+    heartbeat_key = f"stream:{stream_id}:last_heartbeat"
+    config_key = f"stream:{stream_id}:config"
+    now = time.time()
+    await client.set(heartbeat_key, str(now), ex=ttl)
+    await client.expire(config_key, ttl)
+
+  async def _heartbeat_loop(self, stream_id: str) -> None:
+    try:
+      while stream_id in self.active_streams:
+        ttl = self.stream_ttls.get(stream_id, self.default_ttl)
+        await self._touch_stream(stream_id, ttl)
+        await asyncio.sleep(min(self.heartbeat_interval, ttl / 2))
+    except asyncio.CancelledError:
+      pass
+    except Exception as err:
+      print(f"[runtime] Heartbeat loop error for {stream_id}: {err}", flush=True)
+
+  async def _deregister_stream(self, stream_id: str) -> None:
+    client = self.dispatcher.client
+    hb_task = self.heartbeat_tasks.pop(stream_id, None)
+    if hb_task:
+      hb_task.cancel()
+      with contextlib.suppress(asyncio.CancelledError):
+        await hb_task
+    self.stream_ttls.pop(stream_id, None)
+
+    if not client:
+      return
+
+    await client.srem("active_streams", stream_id)
+    await self._delete_stream_keys(stream_id, client)
+
+  async def _delete_stream_keys(self, stream_id: str, client) -> None:
+    await client.delete(
+      f"stream:{stream_id}:config",
+      f"stream:{stream_id}:subscribers",
+      f"stream:{stream_id}:last_heartbeat",
+      f"stream:{stream_id}:token",
+    )
+    await client.delete(f"stream:{stream_id}")
+
+  async def _cleanup_worker(self) -> None:
+    try:
+      while True:
+        await asyncio.sleep(self.cleanup_interval)
+        await self._cleanup_stale_streams()
+    except asyncio.CancelledError:
+      pass
+
+  async def _cleanup_stale_streams(self) -> None:
+    client = self.dispatcher.client
+    if not client:
+      return
+    stream_ids = await client.smembers("active_streams")
+    if not stream_ids:
+      return
+
+    now = time.time()
+    for stream_id in stream_ids:
+      heartbeat_key = f"stream:{stream_id}:last_heartbeat"
+      raw_last = await client.get(heartbeat_key)
+      if not raw_last:
+        await client.srem("active_streams", stream_id)
+        await self._delete_stream_keys(stream_id, client)
+        continue
+
+      try:
+        last = float(raw_last)
+      except ValueError:
+        last = 0.0
+
+      if now - last > self.stale_threshold:
+        print(f"[runtime] Stream {stream_id} stale > {self.stale_threshold}s, cleaning up", flush=True)
+        if stream_id in self.active_streams:
+          with contextlib.suppress(Exception):
+            await self.stop_stream(stream_id)
+        else:
+          await client.srem("active_streams", stream_id)
+          await self._delete_stream_keys(stream_id, client)

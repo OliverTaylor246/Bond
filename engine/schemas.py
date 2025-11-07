@@ -63,6 +63,31 @@ class CustomEvent(BaseModel):
   data: dict[str, Any]
 
 
+class PolymarketEvent(BaseModel):
+  """Polymarket event snapshot (prediction market metadata)."""
+  ts: datetime
+  source: Literal["polymarket"] = "polymarket"
+  event_id: str = Field(description="Polymarket event identifier")
+  slug: str = Field(description="Human-readable slug")
+  title: str = Field(description="Event title")
+  category: Optional[str] = Field(None, description="Polymarket category label")
+  active: bool = Field(True, description="Whether the event is active")
+  closed: bool = Field(False, description="Whether the event is closed")
+  open_interest: Optional[float] = Field(None, description="Open interest (USD)")
+  liquidity: Optional[float] = Field(None, description="Available liquidity (USD)")
+  volume_total: Optional[float] = Field(None, description="Lifetime volume (USD)")
+  volume_24h: Optional[float] = Field(None, description="24h volume (USD)")
+  market_count: int = Field(0, description="Number of markets attached to event")
+  markets: list[dict[str, Any]] = Field(
+    default_factory=list,
+    description="Subset of market metadata (questions, prices, liquidity)",
+  )
+  metadata: dict[str, Any] = Field(
+    default_factory=dict,
+    description="Additional context (start/end dates, resolution source, media)",
+  )
+
+
 class AggregatedEvent(BaseModel):
   """
   Merged event from multiple sources (output of pipeline).

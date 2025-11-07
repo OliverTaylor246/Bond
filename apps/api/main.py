@@ -5,7 +5,7 @@ REST endpoints to create and manage streams.
 import os
 from contextlib import asynccontextmanager
 from typing import Any
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, ValidationError
@@ -15,7 +15,12 @@ from apps.api.crypto import generate_token, get_secret
 from apps.api.limits import limits
 from apps.api.metrics import metrics_registry
 from apps.api.nlp_parser import parse_stream_request
+from apps.api.polymarket import (
+  build_polymarket_spec,
+  extract_polymarket_query,
+)
 from engine.schemas import StreamSpec
+from connectors.polymarket_stream import discover_polymarket_events
 
 
 # Global runtime instance
@@ -64,6 +69,25 @@ class StreamInfo(BaseModel):
   """Information about an active stream."""
   stream_id: str
   running: bool
+
+
+class PolymarketSearchResponse(BaseModel):
+  """Response payload for Polymarket discovery."""
+  events: list[dict[str, Any]]
+
+
+class PolymarketPlanRequest(BaseModel):
+  """Request payload to plan a Polymarket-only stream."""
+  query: str
+
+
+class PolymarketPlanResponse(BaseModel):
+  """Response containing a spec if handled."""
+  handled: bool
+  reason: str | None = None
+  search_query: str | None = None
+  categories: list[str] = Field(default_factory=list)
+  plan: dict[str, Any] | None = None
 
 
 async def _build_stream_response(stream_id: str, spec: StreamSpec) -> CreateStreamResponse:
@@ -153,11 +177,26 @@ async def create_stream(req: CreateStreamRequest):
           "keywords": [s.lower() for s in config["symbols"]],
           "timeframe": "now 1-d",
         })
+      elif source == "polymarket":
+        spec_dict["sources"].append({
+          "type": "polymarket",
+          "interval_sec": max(15, int(config["interval_sec"])),
+        })
       elif isinstance(source, dict) and source.get("type") == "nitter":
         spec_dict["sources"].append({
           "type": "nitter",
           "username": source.get("username", "elonmusk"),
           "interval_sec": source.get("interval_sec", config["interval_sec"]),
+        })
+      elif isinstance(source, dict) and source.get("type") == "polymarket":
+        spec_dict["sources"].append({
+          "type": "polymarket",
+          "event_ids": source.get("event_ids", []),
+          "categories": source.get("categories", []),
+          "include_closed": bool(source.get("include_closed", False)),
+          "active_only": bool(source.get("active_only", True)),
+          "interval_sec": source.get("interval_sec", max(15, int(config["interval_sec"]))),
+          "limit": source.get("limit", 100),
         })
 
     spec = StreamSpec(**spec_dict)
@@ -401,6 +440,75 @@ async def get_stream_spec(stream_id: str):
   return spec.model_dump()
 
 
+@app.get("/v1/polymarket/search", response_model=PolymarketSearchResponse)
+async def polymarket_search_endpoint(
+  query: str | None = Query(
+    None,
+    description="Keyword filter for event titles/questions",
+    alias="query",
+  ),
+  limit: int = Query(
+    12,
+    ge=1,
+    le=50,
+    description="Maximum number of events to return",
+  ),
+  category: list[str] | None = Query(
+    None,
+    description="Optional category filters",
+  ),
+  tag: str | None = Query(
+    None,
+    description="Optional tag filter (Polymarket tag)",
+  ),
+  include_closed: bool = Query(
+    False,
+    description="Include closed events in the result set",
+  ),
+):
+  """Lightweight Polymarket discovery endpoint for the chat assistant."""
+  try:
+    events = await discover_polymarket_events(
+      query=query,
+      categories=category,
+      tags=[tag] if tag else None,
+      limit=limit,
+      include_closed=include_closed,
+    )
+  except Exception as exc:
+    raise HTTPException(400, f"Failed to search Polymarket: {exc}") from exc
+
+  return PolymarketSearchResponse(events=events)
+
+
+@app.post("/v1/polymarket/plan", response_model=PolymarketPlanResponse)
+async def polymarket_plan(req: PolymarketPlanRequest):
+  """Extract Polymarket intent and build a starter spec."""
+  query, categories = extract_polymarket_query(req.query)
+  if not query:
+    return PolymarketPlanResponse(
+      handled=False,
+      reason="No Polymarket intent detected",
+    )
+
+  spec = build_polymarket_spec(query, categories)
+  plan_payload = {
+    "spec": spec.model_dump(),
+    "reasoning": f"Polymarket request detected for '{query}'.",
+    "parsed_config": {
+      "polymarket_query": query,
+      "categories": categories,
+    },
+  }
+
+  return PolymarketPlanResponse(
+    handled=True,
+    search_query=query,
+    categories=categories,
+    plan=plan_payload,
+  )
+
+
 class NLParseRequest(BaseModel):
   """Request to parse natural language into stream config."""
   query: str
@@ -468,12 +576,27 @@ async def parse_nl_stream(req: NLParseRequest):
           "keywords": [s.lower() for s in config["symbols"]],
           "timeframe": "now 1-d"
         })
+      elif source == "polymarket":
+        spec["sources"].append({
+          "type": "polymarket",
+          "interval_sec": max(15, int(config["interval_sec"])),
+        })
       elif isinstance(source, dict) and source.get("type") == "nitter":
         # Nitter source with username
         spec["sources"].append({
           "type": "nitter",
           "username": source.get("username", "elonmusk"),
           "interval_sec": source.get("interval_sec", config["interval_sec"])
+        })
+      elif isinstance(source, dict) and source.get("type") == "polymarket":
+        spec["sources"].append({
+          "type": "polymarket",
+          "event_ids": source.get("event_ids", []),
+          "categories": source.get("categories", []),
+          "include_closed": bool(source.get("include_closed", False)),
+          "active_only": bool(source.get("active_only", True)),
+          "interval_sec": source.get("interval_sec", max(15, int(config["interval_sec"]))),
+          "limit": source.get("limit", 100),
         })
 
     return NLParseResponse(
