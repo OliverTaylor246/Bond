@@ -92,32 +92,26 @@ async def create_stream(req: CreateStreamRequest):
 
   # Compile spec
   if req.natural_language:
-<<<<<<< HEAD
     # Use DeepSeek NL parser instead of basic parser
     api_key = os.getenv("DEEPSEEK_API_KEY")
     if not api_key:
       raise HTTPException(500, "DEEPSEEK_API_KEY not configured")
 
-    # Parse with DeepSeek
     config = await parse_stream_request(req.natural_language, api_key)
-
-    # Convert to StreamSpec format (same logic as /parse endpoint)
     spec_dict = {
       "sources": [],
       "symbols": [f"{sym}/USDT" for sym in config["symbols"]],
-      "interval_sec": config["interval_sec"]
+      "interval_sec": config["interval_sec"],
     }
 
-    # Add exchange sources
     for exchange_cfg in config["exchanges"]:
       spec_dict["sources"].append({
         "type": "ccxt",
         "exchange": exchange_cfg["exchange"],
         "fields": exchange_cfg["fields"],
-        "symbols": [f"{symbol}/USDT" for symbol in config["symbols"]]
+        "symbols": [f"{symbol}/USDT" for symbol in config["symbols"]],
       })
 
-    # Add additional sources
     for source in config.get("additional_sources", []):
       if source == "twitter":
         spec_dict["sources"].append({"type": "twitter"})
@@ -125,25 +119,16 @@ async def create_stream(req: CreateStreamRequest):
         spec_dict["sources"].append({
           "type": "google_trends",
           "keywords": [s.lower() for s in config["symbols"]],
-          "timeframe": "now 1-d"
+          "timeframe": "now 1-d",
         })
       elif isinstance(source, dict) and source.get("type") == "nitter":
-        # Nitter source with username
         spec_dict["sources"].append({
           "type": "nitter",
           "username": source.get("username", "elonmusk"),
-          "interval_sec": source.get("interval_sec", config["interval_sec"])
+          "interval_sec": source.get("interval_sec", config["interval_sec"]),
         })
 
     spec = StreamSpec(**spec_dict)
-=======
-    spec = compile_spec(req.natural_language)
-    print(
-      "[api] NL request parsed to StreamSpec:",
-      spec.model_dump(),
-      flush=True,
-    )
->>>>>>> origin/UI
   elif req.spec:
     spec = compile_spec(req.spec)
   else:
