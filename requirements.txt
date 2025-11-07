@@ -15,8 +15,11 @@ websockets==12.0
 # Redis
 redis[hiredis]==5.0.1
 
-# HTTP client
-httpx==0.26.0
+# Auth (install first to avoid dependency conflicts)
+supabase==2.3.4
+
+# HTTP client (version compatible with supabase)
+httpx>=0.24,<0.26
 
 # HTML parsing / headless browser
 beautifulsoup4==4.12.3

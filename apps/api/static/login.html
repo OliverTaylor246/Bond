@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Login - Bond</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      background: linear-gradient(135deg, #0a0e27 0%, #1a1f3a 100%);
+      color: #e6ecff;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .login-container {
+      background: rgba(14, 22, 39, 0.95);
+      border: 1px solid rgba(59, 130, 246, 0.25);
+      border-radius: 16px;
+      padding: 48px;
+      width: 100%;
+      max-width: 420px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+    }
+
+    h1 {
+      font-size: 28px;
+      margin-bottom: 8px;
+      text-align: center;
+    }
+
+    .subtitle {
+      text-align: center;
+      color: #8aa1c5;
+      margin-bottom: 32px;
+      font-size: 14px;
+    }
+
+    .form-group {
+      margin-bottom: 20px;
+    }
+
+    label {
+      display: block;
+      margin-bottom: 8px;
+      font-size: 14px;
+      color: #cbd5e1;
+    }
+
+    input {
+      width: 100%;
+      padding: 12px 16px;
+      background: rgba(8, 13, 23, 0.8);
+      border: 1px solid rgba(59, 130, 246, 0.25);
+      border-radius: 10px;
+      color: #e6ecff;
+      font-size: 14px;
+      transition: border-color 0.2s;
+    }
+
+    input:focus {
+      outline: none;
+      border-color: rgba(59, 130, 246, 0.55);
+    }
+
+    button {
+      width: 100%;
+      padding: 14px;
+      background: linear-gradient(135deg, rgba(59,130,246,0.9), rgba(37,99,235,0.85));
+      border: 1px solid rgba(59,130,246,0.55);
+      border-radius: 10px;
+      color: #fff;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform 0.15s;
+      box-shadow: 0 10px 24px rgba(59,130,246,0.25);
+    }
+
+    button:hover {
+      transform: translateY(-2px);
+    }
+
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    .message {
+      margin-top: 16px;
+      padding: 12px;
+      border-radius: 8px;
+      font-size: 13px;
+      text-align: center;
+    }
+
+    .message.error {
+      background: rgba(220, 38, 38, 0.15);
+      color: #fca5a5;
+      border: 1px solid rgba(220, 38, 38, 0.3);
+    }
+
+    .message.success {
+      background: rgba(22, 163, 74, 0.15);
+      color: #86efac;
+      border: 1px solid rgba(22, 163, 74, 0.3);
+    }
+
+    .toggle-mode {
+      margin-top: 24px;
+      text-align: center;
+      font-size: 14px;
+      color: #8aa1c5;
+    }
+
+    .toggle-mode a {
+      color: #3b82f6;
+      text-decoration: none;
+      cursor: pointer;
+    }
+
+    .toggle-mode a:hover {
+      text-decoration: underline;
+    }
+  </style>
+</head>
+<body>
+  <div class="login-container">
+    <h1 id="form-title">Sign In to Bond</h1>
+    <p class="subtitle">Access your real-time data streams</p>
+
+    <form id="auth-form">
+      <div class="form-group">
+        <label for="email">Email</label>
+        <input type="email" id="email" name="email" required autocomplete="email">
+      </div>
+
+      <div class="form-group">
+        <label for="password">Password</label>
+        <input type="password" id="password" name="password" required autocomplete="current-password">
+      </div>
+
+      <button type="submit" id="submit-btn">Sign In</button>
+
+      <div id="message" class="message" style="display: none;"></div>
+    </form>
+
+    <div class="toggle-mode">
+      <span id="toggle-text">Don't have an account?</span>
+      <a id="toggle-link">Sign Up</a>
+    </div>
+  </div>
+
+  <script>
+    const SUPABASE_URL = 'https://eezdrsmjpycrzuriyzni.supabase.co';
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVlemRyc21qcHljcnp1cml5em5pIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI1MDQ1NTgsImV4cCI6MjA3ODA4MDU1OH0.kBl6L1pnX1OnNbTYURcNfijIK8Oqq4xfjXECwLLm_4o';
+
+    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    const authForm = document.getElementById('auth-form');
+    const emailInput = document.getElementById('email');
+    const passwordInput = document.getElementById('password');
+    const submitBtn = document.getElementById('submit-btn');
+    const messageDiv = document.getElementById('message');
+    const formTitle = document.getElementById('form-title');
+    const toggleText = document.getElementById('toggle-text');
+    const toggleLink = document.getElementById('toggle-link');
+
+    let isSignupMode = false;
+
+    // Check if already logged in
+    async function checkAuth() {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session) {
+        // Already logged in, redirect to main app
+        window.location.href = '/';
+      }
+    }
+
+    // Check for auth token in URL (from Echo_Website)
+    async function checkUrlToken() {
+      const urlParams = new URLSearchParams(window.location.search);
+      const authToken = urlParams.get('auth_token');
+
+      if (authToken) {
+        showMessage('Validating session...', 'success');
+        try {
+          // Validate token with Supabase
+          const { data: { user }, error } = await supabase.auth.getUser(authToken);
+
+          if (error) throw error;
+
+          if (user) {
+            // Set session
+            await supabase.auth.setSession({
+              access_token: authToken,
+              refresh_token: '' // We don't have refresh token from URL
+            });
+
+            showMessage('Login successful! Redirecting...', 'success');
+            setTimeout(() => {
+              window.location.href = '/';
+            }, 1000);
+          }
+        } catch (err) {
+          showMessage('Invalid session token. Please log in.', 'error');
+          // Clear URL parameter
+          window.history.replaceState({}, document.title, window.location.pathname);
+        }
+      }
+    }
+
+    function toggleMode() {
+      isSignupMode = !isSignupMode;
+
+      if (isSignupMode) {
+        formTitle.textContent = 'Create Account';
+        submitBtn.textContent = 'Sign Up';
+        toggleText.textContent = 'Already have an account?';
+        toggleLink.textContent = 'Sign In';
+      } else {
+        formTitle.textContent = 'Sign In to Bond';
+        submitBtn.textContent = 'Sign In';
+        toggleText.textContent = "Don't have an account?";
+        toggleLink.textContent = 'Sign Up';
+      }
+
+      messageDiv.style.display = 'none';
+    }
+
+    function showMessage(text, type) {
+      messageDiv.textContent = text;
+      messageDiv.className = `message ${type}`;
+      messageDiv.style.display = 'block';
+    }
+
+    async function handleSubmit(e) {
+      e.preventDefault();
+
+      const email = emailInput.value;
+      const password = passwordInput.value;
+
+      submitBtn.disabled = true;
+      submitBtn.textContent = isSignupMode ? 'Creating account...' : 'Signing in...';
+
+      try {
+        if (isSignupMode) {
+          const { data, error } = await supabase.auth.signUp({ email, password });
+
+          if (error) throw error;
+
+          showMessage('Account created! Please check your email to verify.', 'success');
+          setTimeout(() => toggleMode(), 2000);
+        } else {
+          const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+
+          if (error) throw error;
+
+          showMessage('Login successful! Redirecting...', 'success');
+          setTimeout(() => {
+            window.location.href = '/';
+          }, 1000);
+        }
+      } catch (err) {
+        showMessage(err.message || 'Authentication failed', 'error');
+      } finally {
+        submitBtn.disabled = false;
+        submitBtn.textContent = isSignupMode ? 'Sign Up' : 'Sign In';
+      }
+    }
+
+    toggleLink.addEventListener('click', toggleMode);
+    authForm.addEventListener('submit', handleSubmit);
+
+    // Initialize
+    checkAuth();
+    checkUrlToken();
+  </script>
+</body>
+</html>

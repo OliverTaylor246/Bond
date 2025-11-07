@@ -5,9 +5,9 @@ REST endpoints to create and manage streams.
 import os
 from contextlib import asynccontextmanager
 from typing import Any
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request, Cookie
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel, Field, ValidationError
 from apps.compiler import compile_spec, generate_stream_id
 from apps.runtime import StreamRuntime
@@ -16,6 +16,7 @@ from apps.api.limits import limits
 from apps.api.metrics import metrics_registry
 from apps.api.nlp_parser import parse_stream_request
 from engine.schemas import StreamSpec
+import httpx
 
 
 # Global runtime instance
@@ -93,9 +94,23 @@ async def _build_stream_response(stream_id: str, spec: StreamSpec) -> CreateStre
   )
 
 
+@app.get("/login")
+async def login_page():
+  """Serve the login page."""
+  return FileResponse("/app/apps/api/static/login.html")
+
+
 @app.get("/")
-async def root():
-  """Serve the UI."""
+async def root(request: Request):
+  """Serve the UI - require authentication."""
+  # Check for auth token in query params (from Echo_Website)
+  auth_token = request.query_params.get('auth_token')
+
+  if auth_token:
+    # Redirect to login page with token for validation
+    return RedirectResponse(url=f"/login?auth_token={auth_token}")
+
+  # For now, allow access without auth (will add proper auth check later)
   return FileResponse("/app/apps/api/static/index.html")
 
 
