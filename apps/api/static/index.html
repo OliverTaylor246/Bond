@@ -884,9 +884,15 @@
     <div class="toolbar">
       <button class="nav-link active" id="navChat">Chat</button>
       <button class="nav-link" id="navStreams">Streams</button>
+      <button class="nav-link" id="navHistory">History</button>
       <a class="nav-link" href="https://docs.example.com" target="_blank" rel="noreferrer">Docs</a>
       <button class="nav-link" id="toolbarSettings">Settings</button>
       <button class="primary" id="toolbarNew">New Stream</button>
+      <div id="user-stats" style="margin-left: 16px; display: none; align-items: center; gap: 12px;">
+        <span id="tier-badge" style="font-size: 11px; padding: 4px 8px; border-radius: 6px; background: rgba(59,130,246,0.15); color: #60a5fa; font-weight: 600; text-transform: uppercase;">Free</span>
+        <span id="streams-count" style="color: var(--text-muted); font-size: 12px;">0/5 streams</span>
+        <span id="monthly-count" style="color: var(--text-muted); font-size: 12px;">0 this month</span>
+      </div>
       <div id="auth-status" style="margin-left: 16px; display: none; align-items: center; gap: 8px;">
         <span id="user-email-display" style="color: var(--text-muted); font-size: 13px;"></span>
         <button id="logout-btn" style="border: 1px solid rgba(148,163,184,0.35); background: rgba(148,163,184,0.12); color: var(--text); font-size: 12px; padding: 6px 12px; border-radius: 8px; cursor: pointer;">Sign Out</button>
@@ -945,6 +951,18 @@
       </div>
       <div class="streams-grid" id="streamsDirectory"></div>
     </section>
+
+    <section class="streams-view" id="historyView" style="display: none;">
+      <div class="streams-hero">
+        <div class="streams-hero-headline">
+          <h2>Stream History</h2>
+        </div>
+        <p>View all streams you've created and their current status.</p>
+      </div>
+      <div id="historyContent" style="padding: 20px;">
+        <div id="historyList" style="display: flex; flex-direction: column; gap: 12px;"></div>
+      </div>
+    </section>
   </main>
 
   <script>
@@ -963,8 +981,9 @@
     const root = document.body;
     const VIEW_CHAT = 'chat';
     const VIEW_STREAMS = 'streams';
+    const VIEW_HISTORY = 'history';
     const VIEW_DETAIL = 'stream-detail';
-    const viewClasses = ['view-chat', 'view-streams', 'view-stream-detail'];
+    const viewClasses = ['view-chat', 'view-streams', 'view-history', 'view-stream-detail'];
 
     const activeStreams = new Map();
     let currentStreamId = null;
@@ -975,23 +994,38 @@
     }
 
     function setView(nextView) {
-      if (![VIEW_CHAT, VIEW_STREAMS, VIEW_DETAIL].includes(nextView)) {
+      if (![VIEW_CHAT, VIEW_STREAMS, VIEW_HISTORY, VIEW_DETAIL].includes(nextView)) {
         nextView = VIEW_CHAT;
       }
       currentView = nextView;
       root.classList.remove(...viewClasses);
       root.classList.add(`view-${nextView}`);
+
+      // Hide all views
+      document.getElementById('chatLog').parentElement.style.display = nextView === VIEW_CHAT ? 'flex' : 'none';
+      document.getElementById('detailPane').style.display = nextView === VIEW_DETAIL ? 'block' : 'none';
+      document.getElementById('streamsView').style.display = nextView === VIEW_STREAMS ? 'block' : 'none';
+      document.getElementById('historyView').style.display = nextView === VIEW_HISTORY ? 'block' : 'none';
+
       if (navChat) {
         navChat.classList.toggle('active', nextView === VIEW_CHAT);
       }
       if (navStreams) {
         navStreams.classList.toggle('active', nextView === VIEW_STREAMS || nextView === VIEW_DETAIL);
       }
+      const navHistory = document.getElementById('navHistory');
+      if (navHistory) {
+        navHistory.classList.toggle('active', nextView === VIEW_HISTORY);
+      }
+
       if (nextView === VIEW_STREAMS && streamsView) {
         streamsView.scrollTop = 0;
       }
       if (nextView === VIEW_CHAT && messageInput) {
         messageInput.focus({ preventScroll: true });
+      }
+      if (nextView === VIEW_HISTORY) {
+        loadHistory();
       }
     }
 
@@ -1007,6 +1041,14 @@
         event.preventDefault();
         setView(VIEW_STREAMS);
         renderStreamsDirectory();
+      });
+    }
+
+    const navHistory = document.getElementById('navHistory');
+    if (navHistory) {
+      navHistory.addEventListener('click', (event) => {
+        event.preventDefault();
+        setView(VIEW_HISTORY);
       });
     }
 
@@ -1581,9 +1623,16 @@
         createBtn.addEventListener('click', async () => {
           bubble.innerHTML = 'Launching stream…';
           try {
+            // Get auth token if available
+            const { data: { session } } = await supabase.auth.getSession();
+            const headers = { 'Content-Type': 'application/json' };
+            if (session?.access_token) {
+              headers['Authorization'] = `Bearer ${session.access_token}`;
+            }
+
             const response = await fetch('/v1/streams', {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
+              headers,
               body: JSON.stringify({ spec }),
             });
             if (!response.ok) throw new Error(await response.text());
@@ -2400,6 +2449,10 @@
     const authStatus = document.getElementById('auth-status');
     const loginLink = document.getElementById('login-link');
     const userEmailDisplay = document.getElementById('user-email-display');
+    const userStatsDiv = document.getElementById('user-stats');
+    const tierBadge = document.getElementById('tier-badge');
+    const streamsCount = document.getElementById('streams-count');
+    const monthlyCount = document.getElementById('monthly-count');
     const logoutBtn = document.getElementById('logout-btn');
 
     // Check auth status on page load
@@ -2411,11 +2464,116 @@
         userEmailDisplay.textContent = session.user.email;
         authStatus.style.display = 'flex';
         loginLink.style.display = 'none';
+        userStatsDiv.style.display = 'flex';
+
+        // Fetch user stats
+        await fetchUserStats(session.access_token);
       } else {
         // User is not logged in
         authStatus.style.display = 'none';
         loginLink.style.display = 'inline-flex';
+        userStatsDiv.style.display = 'none';
       }
+    }
+
+    // Fetch user stats from API
+    async function fetchUserStats(token) {
+      try {
+        const response = await fetch('/v1/user/stats', {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        });
+
+        if (response.ok) {
+          const stats = await response.json();
+
+          // Update tier badge
+          tierBadge.textContent = stats.tier.toUpperCase();
+          tierBadge.style.background = stats.tier === 'free' ? 'rgba(59,130,246,0.15)' :
+                                       stats.tier === 'pro' ? 'rgba(168,85,247,0.15)' :
+                                       'rgba(234,179,8,0.15)';
+          tierBadge.style.color = stats.tier === 'free' ? '#60a5fa' :
+                                  stats.tier === 'pro' ? '#c084fc' :
+                                  '#facc15';
+
+          // Update counts
+          streamsCount.textContent = `${stats.active_streams}/${stats.tier_limit} streams`;
+          monthlyCount.textContent = `${stats.monthly_streams} this month`;
+
+          // Warning if over limit
+          if (stats.active_streams >= stats.tier_limit) {
+            streamsCount.style.color = '#f87171';
+          } else {
+            streamsCount.style.color = 'var(--text-muted)';
+          }
+        }
+      } catch (e) {
+        console.error('Error fetching user stats:', e);
+      }
+    }
+
+    // Load history from API
+    async function loadHistory() {
+      const { data: { session } } = await supabase.auth.getSession();
+
+      if (!session) {
+        document.getElementById('historyList').innerHTML = '<p style="text-align: center; color: var(--text-muted);">Please sign in to view your stream history.</p>';
+        return;
+      }
+
+      try {
+        const response = await fetch('/v1/user/history', {
+          headers: {
+            'Authorization': `Bearer ${session.access_token}`
+          }
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          renderHistory(data.history);
+        } else {
+          document.getElementById('historyList').innerHTML = '<p style="text-align: center; color: var(--text-muted);">Error loading history.</p>';
+        }
+      } catch (e) {
+        console.error('Error loading history:', e);
+        document.getElementById('historyList').innerHTML = '<p style="text-align: center; color: var(--text-muted);">Error loading history.</p>';
+      }
+    }
+
+    // Render history items
+    function renderHistory(history) {
+      const historyList = document.getElementById('historyList');
+
+      if (!history || history.length === 0) {
+        historyList.innerHTML = '<p style="text-align: center; color: var(--text-muted);">No streams created yet.</p>';
+        return;
+      }
+
+      historyList.innerHTML = history.map(item => {
+        const createdDate = new Date(item.created_at);
+        const statusColor = item.is_active ? '#16a34a' : '#8aa1c5';
+        const statusText = item.is_active ? 'LIVE' : 'STOPPED';
+
+        return `
+          <div style="background: rgba(14, 22, 39, 0.6); border: 1px solid rgba(59,130,246,0.15); border-radius: 12px; padding: 16px;">
+            <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 8px;">
+              <div style="flex: 1;">
+                <div style="font-size: 14px; color: var(--text); margin-bottom: 6px;">${escapeHtml(item.user_query)}</div>
+                <div style="font-size: 12px; color: var(--text-muted); font-family: var(--mono);">
+                  Stream ID: ${escapeHtml(item.stream_id)}
+                </div>
+                <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">
+                  ${createdDate.toLocaleString()}
+                </div>
+              </div>
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span style="color: ${statusColor}; font-size: 11px; font-weight: 600;">• ${statusText}</span>
+              </div>
+            </div>
+          </div>
+        `;
+      }).join('');
     }
 
     // Handle logout

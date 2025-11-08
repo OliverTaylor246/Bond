@@ -5,9 +5,10 @@ REST endpoints to create and manage streams.
 import os
 from contextlib import asynccontextmanager
 from typing import Any
-from fastapi import FastAPI, HTTPException, Query, Request
+from datetime import datetime
+from fastapi import FastAPI, HTTPException, Query, Request, Header
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, RedirectResponse, JSONResponse
 from pydantic import BaseModel, Field, ValidationError
 from apps.compiler import compile_spec, generate_stream_id
 from apps.runtime import StreamRuntime
@@ -21,10 +22,23 @@ from apps.api.polymarket import (
 )
 from engine.schemas import StreamSpec
 from connectors.polymarket_stream import discover_polymarket_events
+from supabase import create_client, Client
 
 
 # Global runtime instance
 runtime: StreamRuntime | None = None
+
+# Supabase client
+SUPABASE_URL = "https://eezdrsmjpycrzuriyzni.supabase.co"
+SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVlemRyc21qcHljcnp1cml5em5pIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI1MDQ1NTgsImV4cCI6MjA3ODA4MDU1OH0.kBl6L1pnX1OnNbTYURcNfijIK8Oqq4xfjXECwLLm_4o"
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+# Tier limits
+TIER_LIMITS = {
+  "free": 5,
+  "pro": 50,
+  "enterprise": 999999  # effectively unlimited
+}
 
 
 @asynccontextmanager
@@ -44,6 +58,72 @@ app = FastAPI(
   version="0.1.0",
   lifespan=lifespan,
 )
+
+
+# Helper function to get user ID from Authorization header
+async def get_user_id_from_token(authorization: str | None = None) -> str | None:
+  """Extract user ID from Bearer token."""
+  if not authorization or not authorization.startswith("Bearer "):
+    return None
+
+  token = authorization.replace("Bearer ", "")
+  try:
+    user_response = supabase.auth.get_user(token)
+    if user_response and user_response.user:
+      return user_response.user.id
+  except Exception as e:
+    print(f"Error getting user from token: {e}")
+    return None
+
+  return None
+
+
+# Helper function to record stream creation in database
+async def record_stream_creation(user_id: str, stream_id: str, user_query: str):
+  """Record stream in history and update user stats."""
+  try:
+    # Insert into stream_history
+    supabase.table("stream_history").insert({
+      "user_id": user_id,
+      "stream_id": stream_id,
+      "user_query": user_query,
+      "is_active": True
+    }).execute()
+
+    # Update user_profiles counters
+    supabase.rpc("increment_stream_counts", {"p_user_id": user_id}).execute()
+
+  except Exception as e:
+    print(f"Error recording stream creation: {e}")
+    # Don't fail the request if DB recording fails
+
+
+# Helper function to get user stats
+async def get_user_stats(user_id: str) -> dict:
+  """Get user tier, limits, and usage stats."""
+  try:
+    result = supabase.rpc("get_user_stats", {"p_user_id": user_id}).execute()
+    if result.data and len(result.data) > 0:
+      stats = result.data[0]
+      tier = stats.get("tier", "free")
+      return {
+        "tier": tier,
+        "tier_limit": TIER_LIMITS.get(tier, 5),
+        "active_streams": stats.get("active_streams_count", 0),
+        "total_streams": stats.get("total_streams_created", 0),
+        "monthly_streams": stats.get("streams_created_this_month", 0)
+      }
+  except Exception as e:
+    print(f"Error getting user stats: {e}")
+
+  # Default for non-authenticated or error
+  return {
+    "tier": "free",
+    "tier_limit": 5,
+    "active_streams": 0,
+    "total_streams": 0,
+    "monthly_streams": 0
+  }
 
 
 class CreateStreamRequest(BaseModel):
@@ -144,8 +224,48 @@ async def health():
   return {"status": "ok", "service": "bond"}
 
 
+@app.get("/v1/user/stats")
+async def user_stats(authorization: str | None = Header(None)):
+  """Get current user's stats (tier, usage, limits)."""
+  user_id = await get_user_id_from_token(authorization)
+
+  if not user_id:
+    raise HTTPException(401, "Authentication required")
+
+  stats = await get_user_stats(user_id)
+  return stats
+
+
+@app.get("/v1/user/history")
+async def user_history(
+  authorization: str | None = Header(None),
+  limit: int = Query(20, ge=1, le=100)
+):
+  """Get current user's stream creation history."""
+  user_id = await get_user_id_from_token(authorization)
+
+  if not user_id:
+    raise HTTPException(401, "Authentication required")
+
+  try:
+    result = supabase.table("stream_history")\
+      .select("*")\
+      .eq("user_id", user_id)\
+      .order("created_at", desc=True)\
+      .limit(limit)\
+      .execute()
+
+    return {"history": result.data}
+  except Exception as e:
+    print(f"Error fetching user history: {e}")
+    raise HTTPException(500, "Failed to fetch history")
+
+
 @app.post("/v1/streams", response_model=CreateStreamResponse)
-async def create_stream(req: CreateStreamRequest):
+async def create_stream(
+  req: CreateStreamRequest,
+  authorization: str | None = Header(None)
+):
   """
   Create a new data stream.
 
@@ -154,6 +274,17 @@ async def create_stream(req: CreateStreamRequest):
   """
   if not runtime:
     raise HTTPException(500, "Runtime not initialized")
+
+  # Get user ID from auth token (optional for now)
+  user_id = await get_user_id_from_token(authorization)
+  user_query = req.natural_language or "Custom spec"
+
+  # Check tier limits if authenticated
+  if user_id:
+    stats = await get_user_stats(user_id)
+    if stats["active_streams"] >= stats["tier_limit"]:
+      # Show warning but don't block
+      print(f"⚠️  User {user_id} ({stats['tier']}) has {stats['active_streams']}/{stats['tier_limit']} active streams")
 
   # Check limits before creating
   current_count = len(runtime.list_streams())
@@ -228,6 +359,10 @@ async def create_stream(req: CreateStreamRequest):
     await runtime.launch_stream(stream_id, spec)
     # Create metrics tracker
     metrics_registry.create(stream_id)
+
+    # Record stream creation in database if user is authenticated
+    if user_id:
+      await record_stream_creation(user_id, stream_id, user_query)
 
   return await _build_stream_response(stream_id, spec)
 
