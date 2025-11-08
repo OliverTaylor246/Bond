@@ -886,16 +886,28 @@
       <button class="nav-link" id="navStreams">Streams</button>
       <button class="nav-link" id="navHistory">History</button>
       <a class="nav-link" href="https://docs.example.com" target="_blank" rel="noreferrer">Docs</a>
-      <button class="nav-link" id="toolbarSettings">Settings</button>
       <button class="primary" id="toolbarNew">New Stream</button>
-      <div id="user-stats" style="margin-left: 16px; display: none; align-items: center; gap: 12px;">
-        <span id="tier-badge" style="font-size: 11px; padding: 4px 8px; border-radius: 6px; background: rgba(59,130,246,0.15); color: #60a5fa; font-weight: 600; text-transform: uppercase;">Free</span>
-        <span id="streams-count" style="color: var(--text-muted); font-size: 12px;">0/5 streams</span>
-        <span id="monthly-count" style="color: var(--text-muted); font-size: 12px;">0 this month</span>
-      </div>
-      <div id="auth-status" style="margin-left: 16px; display: none; align-items: center; gap: 8px;">
-        <span id="user-email-display" style="color: var(--text-muted); font-size: 13px;"></span>
-        <button id="logout-btn" style="border: 1px solid rgba(148,163,184,0.35); background: rgba(148,163,184,0.12); color: var(--text); font-size: 12px; padding: 6px 12px; border-radius: 8px; cursor: pointer;">Sign Out</button>
+      <div id="auth-status" style="margin-left: 16px; display: none; position: relative;">
+        <button id="user-email-display" style="border: 1px solid rgba(148,163,184,0.25); background: rgba(148,163,184,0.08); color: var(--text-muted); font-size: 13px; padding: 8px 12px; border-radius: 8px; cursor: pointer; transition: all 0.2s;">
+          user@example.com
+        </button>
+        <div id="user-dropdown" style="display: none; position: absolute; top: calc(100% + 8px); right: 0; min-width: 220px; background: rgba(22, 28, 38, 0.98); border: 1px solid rgba(59,130,246,0.25); border-radius: 12px; padding: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.4); z-index: 1000;">
+          <div style="display: flex; flex-direction: column; gap: 8px;">
+            <div style="display: flex; align-items: center; justify-content: space-between; padding: 4px 0;">
+              <span style="font-size: 11px; color: var(--text-muted); text-transform: uppercase;">Tier</span>
+              <span id="tier-badge" style="font-size: 11px; padding: 4px 8px; border-radius: 6px; background: rgba(59,130,246,0.15); color: #60a5fa; font-weight: 600; text-transform: uppercase;">Free</span>
+            </div>
+            <div style="display: flex; align-items: center; justify-content: space-between; padding: 4px 0;">
+              <span style="font-size: 11px; color: var(--text-muted); text-transform: uppercase;">Active Streams</span>
+              <span id="streams-count" style="color: var(--text); font-size: 12px; font-weight: 500;">0/5</span>
+            </div>
+            <div style="display: flex; align-items: center; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid rgba(148,163,184,0.15); padding-bottom: 8px;">
+              <span style="font-size: 11px; color: var(--text-muted); text-transform: uppercase;">This Month</span>
+              <span id="monthly-count" style="color: var(--text); font-size: 12px; font-weight: 500;">0</span>
+            </div>
+            <button id="logout-btn" style="margin-top: 4px; border: 1px solid rgba(248,113,113,0.35); background: rgba(248,113,113,0.12); color: #fca5a5; font-size: 12px; padding: 8px 12px; border-radius: 8px; cursor: pointer; width: 100%; transition: all 0.2s;">Sign Out</button>
+          </div>
+        </div>
       </div>
       <a id="login-link" href="/login" style="margin-left: 16px; display: none; border: 1px solid rgba(59,130,246,0.35); background: rgba(59,130,246,0.15); color: var(--text); font-size: 13px; padding: 6px 12px; border-radius: 8px; text-decoration: none;">Sign In</a>
     </div>
@@ -1633,7 +1645,10 @@
             const response = await fetch('/v1/streams', {
               method: 'POST',
               headers,
-              body: JSON.stringify({ spec }),
+              body: JSON.stringify({
+                spec,
+                natural_language: userPrompt || undefined
+              }),
             });
             if (!response.ok) throw new Error(await response.text());
             const stream = await response.json();
@@ -2449,11 +2464,26 @@
     const authStatus = document.getElementById('auth-status');
     const loginLink = document.getElementById('login-link');
     const userEmailDisplay = document.getElementById('user-email-display');
-    const userStatsDiv = document.getElementById('user-stats');
+    const userDropdown = document.getElementById('user-dropdown');
     const tierBadge = document.getElementById('tier-badge');
     const streamsCount = document.getElementById('streams-count');
     const monthlyCount = document.getElementById('monthly-count');
     const logoutBtn = document.getElementById('logout-btn');
+
+    // Toggle dropdown on click
+    if (userEmailDisplay) {
+      userEmailDisplay.addEventListener('click', (e) => {
+        e.stopPropagation();
+        userDropdown.style.display = userDropdown.style.display === 'none' ? 'block' : 'none';
+      });
+    }
+
+    // Close dropdown when clicking outside
+    document.addEventListener('click', (e) => {
+      if (userDropdown && !authStatus.contains(e.target)) {
+        userDropdown.style.display = 'none';
+      }
+    });
 
     // Check auth status on page load
     async function checkAuthStatus() {
@@ -2462,9 +2492,8 @@
       if (session) {
         // User is logged in
         userEmailDisplay.textContent = session.user.email;
-        authStatus.style.display = 'flex';
+        authStatus.style.display = 'block';
         loginLink.style.display = 'none';
-        userStatsDiv.style.display = 'flex';
 
         // Fetch user stats
         await fetchUserStats(session.access_token);
@@ -2472,7 +2501,6 @@
         // User is not logged in
         authStatus.style.display = 'none';
         loginLink.style.display = 'inline-flex';
-        userStatsDiv.style.display = 'none';
       }
     }
 
@@ -2497,15 +2525,15 @@
                                   stats.tier === 'pro' ? '#c084fc' :
                                   '#facc15';
 
-          // Update counts
-          streamsCount.textContent = `${stats.active_streams}/${stats.tier_limit} streams`;
-          monthlyCount.textContent = `${stats.monthly_streams} this month`;
+          // Update counts (simplified format for dropdown)
+          streamsCount.textContent = `${stats.active_streams}/${stats.tier_limit}`;
+          monthlyCount.textContent = `${stats.monthly_streams}`;
 
           // Warning if over limit
           if (stats.active_streams >= stats.tier_limit) {
             streamsCount.style.color = '#f87171';
           } else {
-            streamsCount.style.color = 'var(--text-muted)';
+            streamsCount.style.color = 'var(--text)';
           }
         }
       } catch (e) {
