@@ -39,10 +39,9 @@
       background: var(--gradient-radial), var(--bg);
       color: var(--text);
       font-family: 'Inter', sans-serif;
-      height: 100vh;
+      min-height: 100vh;
       display: flex;
       flex-direction: column;
-      overflow: hidden;
     }
 
     header {
@@ -54,7 +53,8 @@
       justify-content: space-between;
       gap: 32px;
       padding: 0 36px;
-      flex-shrink: 0;
+      position: sticky;
+      top: 0;
       z-index: 10;
       box-shadow: 0 14px 40px rgba(4, 6, 12, 0.6);
     }
@@ -151,7 +151,6 @@
       gap: 28px;
       padding: 36px;
       min-height: 0;
-      overflow: hidden;
     }
 
     .left-pane {
@@ -163,7 +162,7 @@
       flex-direction: column;
       overflow: hidden;
       box-shadow: 0 24px 60px rgba(4, 6, 12, 0.55);
-      height: 100%;
+      max-height: calc(100vh - 72px - 72px);
     }
 
     .session-list {
@@ -310,7 +309,7 @@
     }
 
     .chat-input textarea {
-      min-height: 80px;
+      min-height: 130px;
       resize: none;
       border-radius: 14px;
       background: rgba(14, 18, 26, 0.9);
