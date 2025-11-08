@@ -162,6 +162,7 @@
       flex-direction: column;
       overflow: hidden;
       box-shadow: 0 24px 60px rgba(4, 6, 12, 0.55);
+      max-height: calc(100vh - 72px - 72px);
     }
 
     .session-list {
@@ -304,6 +305,7 @@
       flex-direction: column;
       gap: 12px;
       background: rgba(20, 25, 33, 0.88);
+      flex-shrink: 0;
     }
 
     .chat-input textarea {
