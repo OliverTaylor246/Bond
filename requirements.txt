@@ -2,9 +2,9 @@
 # Python 3.11+
 
 # Core framework
-fastapi>=0.115.0
+fastapi==0.109.0
 uvicorn[standard]==0.27.0
-pydantic>=2.11.7,<3.0
+pydantic==2.5.3
 
 # Data sources
 ccxt==4.2.25
@@ -15,11 +15,8 @@ websockets==12.0
 # Redis
 redis[hiredis]==5.0.1
 
-# HTTP client
-httpx>=0.26,<0.29
-
 # Auth
-supabase==2.23.3
+supabase==2.6.0
 
 # HTML parsing / headless browser
 beautifulsoup4==4.12.3
