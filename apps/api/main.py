@@ -98,6 +98,19 @@ async def record_stream_creation(user_id: str, stream_id: str, user_query: str):
     # Don't fail the request if DB recording fails
 
 
+# Helper function to mark stream as stopped
+async def mark_stream_stopped(stream_id: str):
+  """Mark a stream as inactive in the database."""
+  try:
+    from datetime import datetime
+    supabase.table("stream_history").update({
+      "is_active": False,
+      "stopped_at": datetime.utcnow().isoformat()
+    }).eq("stream_id", stream_id).eq("is_active", True).execute()
+  except Exception as e:
+    print(f"Error marking stream as stopped: {e}")
+
+
 # Helper function to get user stats
 async def get_user_stats(user_id: str) -> dict:
   """Get user tier, limits, and usage stats."""
@@ -106,10 +119,20 @@ async def get_user_stats(user_id: str) -> dict:
     if result.data and len(result.data) > 0:
       stats = result.data[0]
       tier = stats.get("tier", "free")
+
+      # Get accurate active streams count from runtime
+      if runtime:
+        user_streams = supabase.table("stream_history").select("stream_id").eq("user_id", user_id).eq("is_active", True).execute()
+        active_stream_ids = [s["stream_id"] for s in (user_streams.data or [])]
+        # Count how many are actually running
+        actual_active = sum(1 for sid in active_stream_ids if runtime.is_running(sid))
+      else:
+        actual_active = stats.get("active_streams_count", 0)
+
       return {
         "tier": tier,
         "tier_limit": TIER_LIMITS.get(tier, 5),
-        "active_streams": stats.get("active_streams_count", 0),
+        "active_streams": actual_active,
         "total_streams": stats.get("total_streams_created", 0),
         "monthly_streams": stats.get("streams_created_this_month", 0)
       }
@@ -255,7 +278,13 @@ async def user_history(
       .limit(limit)\
       .execute()
 
-    return {"history": result.data}
+    # Update is_active based on actual runtime status
+    history = result.data or []
+    if runtime:
+      for item in history:
+        item["is_active"] = runtime.is_running(item["stream_id"])
+
+    return {"history": history}
   except Exception as e:
     print(f"Error fetching user history: {e}")
     raise HTTPException(500, "Failed to fetch history")
@@ -391,7 +420,10 @@ async def delete_stream(stream_id: str):
     raise HTTPException(404, f"Stream {stream_id} not found")
 
   await runtime.stop_stream(stream_id)
-  
+
+  # Mark stream as stopped in database
+  await mark_stream_stopped(stream_id)
+
   # Clean up metrics
   metrics_registry.delete(stream_id)
 
