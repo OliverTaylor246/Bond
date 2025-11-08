@@ -2597,11 +2597,43 @@
               </div>
               <div style="display: flex; align-items: center; gap: 8px;">
                 <span style="color: ${statusColor}; font-size: 11px; font-weight: 600;">• ${statusText}</span>
+                ${item.is_active ? `<button class="stop-stream-btn" data-stream-id="${escapeHtml(item.stream_id)}" style="border: 1px solid rgba(248,113,113,0.35); background: rgba(248,113,113,0.12); color: #fca5a5; font-size: 11px; padding: 4px 10px; border-radius: 6px; cursor: pointer; transition: all 0.2s;">Stop</button>` : ''}
               </div>
             </div>
           </div>
         `;
       }).join('');
+
+      // Add event listeners to stop buttons
+      document.querySelectorAll('.stop-stream-btn').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+          const streamId = e.target.getAttribute('data-stream-id');
+          if (!streamId) return;
+
+          e.target.disabled = true;
+          e.target.textContent = 'Stopping...';
+
+          try {
+            const response = await fetch(`/v1/streams/${streamId}`, {
+              method: 'DELETE'
+            });
+
+            if (response.ok) {
+              // Reload history to reflect changes
+              await loadHistory();
+            } else {
+              alert('Failed to stop stream');
+              e.target.disabled = false;
+              e.target.textContent = 'Stop';
+            }
+          } catch (error) {
+            console.error('Error stopping stream:', error);
+            alert('Error stopping stream');
+            e.target.disabled = false;
+            e.target.textContent = 'Stop';
+          }
+        });
+      });
     }
 
     // Handle logout
