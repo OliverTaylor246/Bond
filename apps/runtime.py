@@ -18,10 +18,10 @@ from connectors.ccxt_ws import (
 )
 from connectors.x_stream import x_stream
 from connectors.custom_ws import custom_stream
-from connectors.onchain_grpc import onchain_stream
 from connectors.google_trends_stream import google_trends_stream
 from connectors.nitter_playwright import nitter_playwright_stream
 from connectors.polymarket_stream import polymarket_events_stream
+from connectors.jupiter_price import jupiter_price_stream
 
 BASE_EXCHANGE_PREFERENCE = ["binanceus", "binance"]
 
@@ -151,11 +151,30 @@ class StreamRuntime:
       if not source_symbols:
         source_symbols = [default_symbol]
 
+      resolved_map_raw = source_cfg.get("resolved_symbols")
+      resolved_map: dict[str, list[str]] = {}
+      if isinstance(resolved_map_raw, dict):
+        for ex_name, sym_list in resolved_map_raw.items():
+          if not sym_list:
+            continue
+          normalized = normalize_symbols(sym_list)
+          if normalized:
+            resolved_map[ex_name.lower()] = normalized
+
       candidates = self._build_exchange_preference(extract_exchange_list(source_cfg))
+      if resolved_map:
+        filtered = [ex for ex in candidates if ex in resolved_map]
+        if filtered:
+          candidates = filtered
       state = {"idx": 0}
 
       def current_exchange() -> str:
         return candidates[state["idx"] % len(candidates)]
+
+      def resolve_symbols_for_exchange(exchange: str) -> list[str]:
+        if resolved_map and resolved_map.get(exchange):
+          return list(resolved_map[exchange])
+        return list(source_symbols)
 
       market_type = source_cfg.get("market_type") or source_cfg.get("market")
       if isinstance(market_type, str):
@@ -175,32 +194,36 @@ class StreamRuntime:
       }
       if timeframe:
         metadata["timeframe"] = timeframe
+      if resolved_map:
+        metadata["resolved_symbols"] = resolved_map
 
       name = next_name("ccxt")
 
       def create_stream():
         exchange = current_exchange()
+        exchange_symbols = resolve_symbols_for_exchange(exchange)
         metadata["active_exchange"] = exchange
+        metadata["symbols"] = list(exchange_symbols)
         if use_candles:
           print(
             f"[runtime] Starting CCXT candle stream on {exchange} "
-            f"for symbols={source_symbols} timeframe={timeframe}",
+            f"for symbols={exchange_symbols} timeframe={timeframe}",
             flush=True,
           )
           return ccxt_ws_candle_stream(
             exchange,
-            list(source_symbols),
+            list(exchange_symbols),
             interval,
             market_type=market_type,
           )
 
         print(
-          f"[runtime] Starting CCXT trade stream on {exchange} for symbols={source_symbols}",
+          f"[runtime] Starting CCXT trade stream on {exchange} for symbols={exchange_symbols}",
           flush=True,
         )
         return ccxt_ws_exchange_stream(
           exchange,
-          list(source_symbols),
+          list(exchange_symbols),
           market_type=market_type,
         )
 
@@ -281,32 +304,6 @@ class StreamRuntime:
             "keywords": list(keywords),
             "timeframe": timeframe,
             "interval_sec": trends_interval,
-          },
-        )
-      )
-
-    def add_onchain_source(source_cfg: dict) -> None:
-      chain = source_cfg.get("chain", "sol")
-      event_types = source_cfg.get("event_types", ["tx", "transfer"])
-      interval_override = int(source_cfg.get("interval_sec") or interval)
-      interval_override = max(1, interval_override)
-
-      def create_stream():
-        print(
-          f"[runtime] Starting on-chain stream chain={chain} events={event_types}",
-          flush=True,
-        )
-        return onchain_stream(chain, list(event_types), interval_override)
-
-      pipeline_sources.append(
-        SourceConfig(
-          name=next_name("onchain"),
-          type="onchain",
-          create_stream=create_stream,
-          metadata={
-            "chain": chain,
-            "event_types": list(event_types),
-            "interval_sec": interval_override,
           },
         )
       )
@@ -409,15 +406,71 @@ class StreamRuntime:
         )
       )
 
+    def add_jupiter_source(source_cfg: dict) -> None:
+      mint = (
+        source_cfg.get("mint")
+        or source_cfg.get("contract")
+        or source_cfg.get("id")
+      )
+      if not isinstance(mint, str) or not mint.strip():
+        print("[runtime] Jupiter source missing mint/id - skipping", flush=True)
+        return
+
+      raw_symbol = (
+        source_cfg.get("symbol")
+        or source_cfg.get("token_symbol")
+        or source_cfg.get("token")
+        or default_symbol
+      )
+      normalized_symbol = (raw_symbol or "").replace("$", "").upper()
+      if not normalized_symbol:
+        normalized_symbol = default_symbol
+      if "/" not in normalized_symbol:
+        normalized_symbol = f"{normalized_symbol}/USDC"
+
+      interval_override = float(source_cfg.get("interval_sec") or interval)
+      interval_override = max(1.0, interval_override)
+      token_name = source_cfg.get("token_name") or source_cfg.get("name")
+      mint_clean = mint.strip()
+
+      def create_stream():
+        print(
+          f"[runtime] Starting Jupiter stream mint={mint_clean} symbol={normalized_symbol} "
+          f"(interval={interval_override}s)",
+          flush=True,
+        )
+        return jupiter_price_stream(
+          mint_clean,
+          symbol=normalized_symbol,
+          interval_sec=interval_override,
+        )
+
+      metadata = {
+        "mint": mint_clean,
+        "symbol": normalized_symbol,
+        "token_name": token_name,
+        "interval_sec": interval_override,
+      }
+      if source_cfg.get("decimals") is not None:
+        metadata["decimals"] = source_cfg.get("decimals")
+
+      pipeline_sources.append(
+        SourceConfig(
+          name=next_name("jupiter"),
+          type="jupiter",
+          create_stream=create_stream,
+          metadata=metadata,
+        )
+      )
+
     handlers = {
       "ccxt": add_ccxt_source,
       "twitter": add_twitter_source,
       "google_trends": add_google_trends_source,
-      "onchain": add_onchain_source,
-      "onchain.grpc": add_onchain_source,
       "custom": add_custom_source,
       "nitter": add_nitter_source,
       "polymarket": add_polymarket_source,
+      "jupiter": add_jupiter_source,
     }
 
     for source in spec.sources:
@@ -432,7 +485,6 @@ class StreamRuntime:
       print("[runtime] FALLBACK: No sources provided, using default bundle", flush=True)
       add_ccxt_source({"symbols": symbols})
       add_twitter_source({})
-      add_onchain_source({})
 
     pipeline = MultiSourcePipeline(stream_id, interval, self.dispatcher)
 

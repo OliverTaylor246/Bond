@@ -2,10 +2,13 @@
 FastAPI control plane for bond.
 REST endpoints to create and manage streams.
 """
+import asyncio
 import os
+import time
 from contextlib import asynccontextmanager
-from typing import Any
+from dataclasses import asdict
 from datetime import datetime
+from typing import Any
 from fastapi import FastAPI, HTTPException, Query, Request, Header
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, RedirectResponse, JSONResponse
@@ -20,8 +23,16 @@ from apps.api.polymarket import (
   build_polymarket_spec,
   extract_polymarket_query,
 )
+from apps.api.spec_builder import build_spec_from_parsed_config, normalize_symbol
+from apps.api.stream_planner import run_multi_agent_planner
 from engine.schemas import StreamSpec
 from connectors.polymarket_stream import discover_polymarket_events
+from connectors.ccxt_ws import EXCHANGES, resolve_symbol_map
+from apps.api.jupiter import (
+  fetch_price_snapshot as fetch_jupiter_price_snapshot,
+  pick_best_token as pick_best_jupiter_token,
+  search_tokens as search_jupiter_tokens,
+)
 from supabase import create_client, Client
 
 
@@ -39,6 +50,9 @@ TIER_LIMITS = {
   "pro": 50,
   "enterprise": 999999  # effectively unlimited
 }
+
+SYMBOL_CACHE_TTL = int(os.getenv("SYMBOL_CACHE_TTL", "600"))
+_symbol_cache: dict[tuple[str, str], tuple[float, dict[str, list[str]]]] = {}
 
 
 @asynccontextmanager
@@ -193,6 +207,104 @@ class PolymarketPlanResponse(BaseModel):
   plan: dict[str, Any] | None = None
 
 
+class MarketExchangeEntry(BaseModel):
+  """Exchange availability entry for a symbol."""
+  exchange: str
+  symbols: list[str] = Field(default_factory=list)
+
+
+class MarketAvailabilityResponse(BaseModel):
+  """Describe centralized exchange availability for a token."""
+  symbol: str
+  normalized_symbol: str
+  listed: bool
+  exchanges: list[MarketExchangeEntry] = Field(default_factory=list)
+  resolved_symbols: dict[str, list[str]] = Field(default_factory=dict)
+
+
+class JupiterToken(BaseModel):
+  """Normalized Jupiter token metadata."""
+  id: str
+  contract: str
+  name: str
+  symbol: str
+  usd_price: float | None = None
+  mcap: float | None = None
+  fdv: float | None = None
+  liquidity: float | None = None
+  volume_24h: float | None = None
+  decimals: int | None = None
+  icon: str | None = None
+  is_verified: bool | None = None
+  tags: list[str] = Field(default_factory=list)
+
+
+class JupiterSearchResponse(BaseModel):
+  """Response payload for Jupiter token discovery."""
+  query: str
+  tokens: list[JupiterToken]
+  best_token: JupiterToken | None = None
+  best_reason: str | None = None
+
+
+class JupiterPriceResponse(BaseModel):
+  """Price snapshot for a Jupiter mint."""
+  mint: str
+  usd_price: float | None = None
+  price_change_24h: float | None = None
+  block_id: int | None = None
+  decimals: int | None = None
+
+
+async def _resolve_symbol_availability(
+  symbol: str,
+  *,
+  market_type: str | None = None,
+) -> dict[str, list[str]]:
+  """Resolve which configured exchanges list the given symbol."""
+  normalized = normalize_symbol(symbol)
+  key = (normalized, (market_type or "spot").lower())
+  now = time.time()
+  cached = _symbol_cache.get(key)
+  if cached and (now - cached[0]) < SYMBOL_CACHE_TTL:
+    return cached[1]
+
+  def blocking_call():
+    return resolve_symbol_map(list(EXCHANGES), [normalized], market_type)
+
+  try:
+    result = await asyncio.to_thread(blocking_call)
+  except Exception as exc:
+    raise HTTPException(400, f"Failed to inspect exchanges: {exc}") from exc
+  sanitized: dict[str, list[str]] = {}
+  for exchange, symbols in (result or {}).items():
+    if not symbols:
+      continue
+    sanitized[exchange] = list(symbols)
+
+  _symbol_cache[key] = (now, sanitized)
+  return sanitized
+
+
+def _jupiter_summary_to_model(summary: dict[str, Any]) -> "JupiterToken":
+  """Convert Jupiter summary dict into a JupiterToken model."""
+  return JupiterToken(
+    id=summary.get("id"),
+    contract=summary.get("contract") or summary.get("id"),
+    name=summary.get("name") or summary.get("symbol") or summary.get("id"),
+    symbol=summary.get("symbol") or summary.get("id"),
+    usd_price=summary.get("usd_price"),
+    mcap=summary.get("mcap"),
+    fdv=summary.get("fdv"),
+    liquidity=summary.get("liquidity"),
+    volume_24h=summary.get("volume_24h"),
+    decimals=summary.get("decimals"),
+    icon=summary.get("icon"),
+    is_verified=summary.get("is_verified"),
+    tags=summary.get("tags", []),
+  )
+
+
 async def _build_stream_response(stream_id: str, spec: StreamSpec) -> CreateStreamResponse:
   """Generate access tokens and WS URL for a stream."""
   if not runtime:
@@ -290,6 +402,69 @@ async def user_history(
     raise HTTPException(500, "Failed to fetch history")
 
 
+@app.get("/v1/markets/check", response_model=MarketAvailabilityResponse)
+async def market_availability(
+  symbol: str = Query(
+    ...,
+    description="Token symbol or ticker (e.g., WIF)",
+    min_length=2,
+  ),
+  market_type: str | None = Query(
+    None,
+    description="Optional market type override (spot, futures, swap)",
+  ),
+):
+  """Check if a symbol is listed on the supported centralized exchanges."""
+  cleaned = (symbol or "").replace("$", "").strip().upper()
+  if not cleaned:
+    raise HTTPException(400, "symbol is required")
+
+  normalized_symbol = normalize_symbol(cleaned)
+  resolved = await _resolve_symbol_availability(normalized_symbol, market_type=market_type)
+  exchanges = [
+    MarketExchangeEntry(exchange=ex, symbols=syms)
+    for ex, syms in resolved.items()
+  ]
+  listed = any(entry.symbols for entry in exchanges)
+
+  return MarketAvailabilityResponse(
+    symbol=cleaned,
+    normalized_symbol=normalized_symbol,
+    listed=listed,
+    exchanges=exchanges,
+    resolved_symbols=resolved,
+  )
+
+
+@app.get("/v1/jupiter/search", response_model=JupiterSearchResponse)
+async def jupiter_search(
+  query: str = Query(..., min_length=1, description="Token ticker or name"),
+  limit: int = Query(5, ge=1, le=25, description="Maximum tokens to return"),
+):
+  """Search Jupiter Lite API for tokens and surface best contract candidate."""
+  tokens = await search_jupiter_tokens(query, limit=limit)
+  best, reason = pick_best_jupiter_token(tokens)
+
+  token_models = [_jupiter_summary_to_model(token) for token in tokens]
+  best_model = _jupiter_summary_to_model(best) if best else None
+
+  return JupiterSearchResponse(
+    query=query,
+    tokens=token_models,
+    best_token=best_model,
+    best_reason=reason,
+  )
+
+
+@app.get("/v1/jupiter/price", response_model=JupiterPriceResponse)
+async def jupiter_price(mint: str = Query(..., min_length=16, description="Token mint address")):
+  """Return a single Jupiter price snapshot for the provided mint."""
+  snapshot = await fetch_jupiter_price_snapshot(mint.strip())
+  if not snapshot:
+    raise HTTPException(404, "Token not found on Jupiter")
+  return JupiterPriceResponse(**snapshot)
+
+
 @app.post("/v1/streams", response_model=CreateStreamResponse)
 async def create_stream(
   req: CreateStreamRequest,
@@ -328,53 +503,12 @@ async def create_stream(
     if not api_key:
       raise HTTPException(500, "DEEPSEEK_API_KEY not configured")
 
-    config = await parse_stream_request(req.natural_language, api_key)
-    spec_dict = {
-      "sources": [],
-      "symbols": [f"{sym}/USDT" for sym in config["symbols"]],
-      "interval_sec": config["interval_sec"],
-    }
-
-    for exchange_cfg in config["exchanges"]:
-      spec_dict["sources"].append({
-        "type": "ccxt",
-        "exchange": exchange_cfg["exchange"],
-        "fields": exchange_cfg["fields"],
-        "symbols": [f"{symbol}/USDT" for symbol in config["symbols"]],
-      })
-
-    for source in config.get("additional_sources", []):
-      if source == "twitter":
-        spec_dict["sources"].append({"type": "twitter"})
-      elif source == "google_trends":
-        spec_dict["sources"].append({
-          "type": "google_trends",
-          "keywords": [s.lower() for s in config["symbols"]],
-          "timeframe": "now 1-d",
-        })
-      elif source == "polymarket":
-        spec_dict["sources"].append({
-          "type": "polymarket",
-          "interval_sec": max(15, int(config["interval_sec"])),
-        })
-      elif isinstance(source, dict) and source.get("type") == "nitter":
-        spec_dict["sources"].append({
-          "type": "nitter",
-          "username": source.get("username", "elonmusk"),
-          "interval_sec": source.get("interval_sec", config["interval_sec"]),
-        })
-      elif isinstance(source, dict) and source.get("type") == "polymarket":
-        spec_dict["sources"].append({
-          "type": "polymarket",
-          "event_ids": source.get("event_ids", []),
-          "categories": source.get("categories", []),
-          "include_closed": bool(source.get("include_closed", False)),
-          "active_only": bool(source.get("active_only", True)),
-          "interval_sec": source.get("interval_sec", max(15, int(config["interval_sec"]))),
-          "limit": source.get("limit", 100),
-        })
-
-    spec = StreamSpec(**spec_dict)
+    planner_result = await run_multi_agent_planner(req.natural_language, api_key=api_key)
+    if planner_result.handled and planner_result.spec:
+      spec = StreamSpec(**planner_result.spec)
+    else:
+      config = await parse_stream_request(req.natural_language, api_key)
+      spec = StreamSpec(**build_spec_from_parsed_config(config))
   elif req.spec:
     spec = compile_spec(req.spec)
   else:
@@ -723,63 +857,18 @@ async def parse_nl_stream(req: NLParseRequest):
       raise HTTPException(404, f"Stream {req.stream_id} not found")
     current_spec = runtime.get_stream_spec(req.stream_id).model_dump()
 
+  planner_result = await run_multi_agent_planner(req.query, api_key=api_key, current_spec=current_spec)
+  if planner_result.handled and planner_result.spec:
+    return NLParseResponse(
+      spec=planner_result.spec,
+      reasoning=" ".join(planner_result.reasoning),
+      parsed_config={"agent_outputs": [asdict(output) for output in planner_result.agent_outputs]},
+    )
+
   try:
     config = await parse_stream_request(req.query, api_key, current_spec=current_spec)
 
-    # Convert to StreamSpec format
-    spec = {
-      "sources": [],
-      "symbols": [f"{sym}/USDT" for sym in config["symbols"]],
-      "interval_sec": config["interval_sec"]
-    }
-
-    # Add exchange sources (one source per exchange with all symbols)
-    for exchange_cfg in config["exchanges"]:
-      exchange_name = (exchange_cfg.get("exchange") or "").lower()
-      if exchange_name == "binance":
-        exchange_name = "binanceus"
-      elif not exchange_name:
-        exchange_name = "binanceus"
-
-      spec["sources"].append({
-        "type": "ccxt",
-        "exchange": exchange_name,
-        "fields": exchange_cfg["fields"],
-        "symbols": [f"{symbol}/USDT" for symbol in config["symbols"]]
-      })
-
-    # Add additional sources
-    for source in config.get("additional_sources", []):
-      if source == "twitter":
-        spec["sources"].append({"type": "twitter"})
-      elif source == "google_trends":
-        spec["sources"].append({
-          "type": "google_trends",
-          "keywords": [s.lower() for s in config["symbols"]],
-          "timeframe": "now 1-d"
-        })
-      elif source == "polymarket":
-        spec["sources"].append({
-          "type": "polymarket",
-          "interval_sec": max(15, int(config["interval_sec"])),
-        })
-      elif isinstance(source, dict) and source.get("type") == "nitter":
-        # Nitter source with username
-        spec["sources"].append({
-          "type": "nitter",
-          "username": source.get("username", "elonmusk"),
-          "interval_sec": source.get("interval_sec", config["interval_sec"])
-        })
-      elif isinstance(source, dict) and source.get("type") == "polymarket":
-        spec["sources"].append({
-          "type": "polymarket",
-          "event_ids": source.get("event_ids", []),
-          "categories": source.get("categories", []),
-          "include_closed": bool(source.get("include_closed", False)),
-          "active_only": bool(source.get("active_only", True)),
-          "interval_sec": source.get("interval_sec", max(15, int(config["interval_sec"]))),
-          "limit": source.get("limit", 100),
-        })
+    spec = build_spec_from_parsed_config(config)
 
     return NLParseResponse(
       spec=spec,
@@ -789,3 +878,39 @@ async def parse_nl_stream(req: NLParseRequest):
 
   except Exception as e:
     raise HTTPException(400, f"Failed to parse request: {str(e)}")
+
+
+@app.post("/v1/streams/{stream_id}/edit", response_model=NLParseResponse)
+async def edit_stream_nl(stream_id: str, req: NLParseRequest):
+  """
+  Edit an existing stream via natural language.
+  """
+  api_key = os.getenv("DEEPSEEK_API_KEY")
+  if not api_key:
+    raise HTTPException(500, "DEEPSEEK_API_KEY not configured")
+
+  if not runtime:
+    raise HTTPException(500, "Runtime not initialized")
+  if not runtime.is_running(stream_id):
+    raise HTTPException(404, f"Stream {stream_id} not found")
+
+  current_spec = runtime.get_stream_spec(stream_id).model_dump()
+
+  planner_result = await run_multi_agent_planner(req.query, api_key=api_key, current_spec=current_spec)
+  if planner_result.handled and planner_result.spec:
+    return NLParseResponse(
+      spec=planner_result.spec,
+      reasoning=" ".join(planner_result.reasoning),
+      parsed_config={"agent_outputs": [asdict(output) for output in planner_result.agent_outputs]},
+    )
+
+  try:
+    config = await parse_stream_request(req.query, api_key, current_spec=current_spec)
+    spec = build_spec_from_parsed_config(config)
+    return NLParseResponse(
+      spec=spec,
+      reasoning=config.get("reasoning", ""),
+      parsed_config=config,
+    )
+  except Exception as exc:
+    raise HTTPException(400, f"Failed to edit stream: {exc}") from exc

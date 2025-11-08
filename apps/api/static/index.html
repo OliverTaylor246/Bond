@@ -1000,6 +1000,7 @@
     const VIEW_STREAMS = 'streams';
     const VIEW_HISTORY = 'history';
     const VIEW_DETAIL = 'stream-detail';
+    const DEX_DEFAULT_INTERVAL_SEC = 2;
     const viewClasses = ['view-chat', 'view-streams', 'view-history', 'view-stream-detail'];
 
     const activeStreams = new Map();
@@ -1094,6 +1095,7 @@
     const pollTimers = new Map();
     let pendingPolymarketSelection = null;
     let pendingPolymarketTagPrompt = null;
+    let pendingDexPreference = null;
 
     function setPauseButtonLabels() {
       pauseAllButtons.forEach(btn => {
@@ -1118,6 +1120,299 @@
       } catch (err) {
         return JSON.parse(JSON.stringify(spec));
       }
+    }
+
+    function detectTokenPricePrompt(text) {
+      if (!text) return null;
+      const normalized = text.trim();
+      if (!normalized) return null;
+      const patterns = [
+        /\bprice\s+(?:of|for)\s+\$?([a-z0-9]{2,12})\b/i,
+        /\bget\s+(?:me\s+)?\$?([a-z0-9]{2,12})\s+price\b/i,
+      ];
+      for (const pattern of patterns) {
+        const match = normalized.match(pattern);
+        if (match && match[1]) {
+          const symbol = match[1].replace(/[^a-z0-9]/gi, '').toUpperCase();
+          if (symbol.length >= 2 && symbol.length <= 12) {
+            return { symbol, original: match[0] };
+          }
+        }
+      }
+      const simple = normalized.match(/^\s*\$?([a-z0-9]{2,12})\s+price\b/i);
+      if (simple && simple[1]) {
+        const words = normalized.split(/\s+/);
+        if (words.length <= 4) {
+          const symbol = simple[1].replace(/[^a-z0-9]/gi, '').toUpperCase();
+          if (symbol.length >= 2 && symbol.length <= 12) {
+            return { symbol, original: simple[0] };
+          }
+        }
+      }
+      return null;
+    }
+
+    function detectMintAddress(text) {
+      if (!text) return null;
+      const normalized = text.trim();
+      if (!normalized) return null;
+      const keywordMatch = normalized.match(/\b(?:mint|token|contract|address)\s+([1-9A-HJ-NP-Za-km-z]{32,44})\b/);
+      if (keywordMatch && keywordMatch[1]) {
+        return { mint: keywordMatch[1], context: 'keyword' };
+      }
+      const standaloneMatch = normalized.match(/^([1-9A-HJ-NP-Za-km-z]{32,44})$/);
+      if (standaloneMatch && standaloneMatch[1]) {
+        return { mint: standaloneMatch[1], context: 'standalone' };
+      }
+      const genericMatch = normalized.match(/\b([1-9A-HJ-NP-Za-km-z]{32,44})\b/);
+      if (genericMatch && genericMatch[1]) {
+        const leadWords = normalized.slice(0, genericMatch.index).trim().split(/\s+/);
+        const tailWords = normalized.slice(genericMatch.index + genericMatch[0].length).trim().split(/\s+/);
+        if (leadWords.length <= 4 && tailWords.length <= 4) {
+          return { mint: genericMatch[1], context: 'loose' };
+        }
+      }
+      return null;
+    }
+
+    function formatMintPreview(mint) {
+      if (!mint) return '';
+      return mint.length > 12 ? `${mint.slice(0, 6)}…${mint.slice(-4)}` : mint;
+    }
+
+    function formatCompactNumber(value) {
+      const num = Number(value);
+      if (!Number.isFinite(num) || num === 0) return null;
+      const abs = Math.abs(num);
+      if (abs >= 1e9) return `${(num / 1e9).toFixed(2)}B`;
+      if (abs >= 1e6) return `${(num / 1e6).toFixed(2)}M`;
+      if (abs >= 1e3) return `${(num / 1e3).toFixed(2)}K`;
+      return num.toFixed(2);
+    }
+
+    function describeBestReason(reason) {
+      if (reason === 'highest_marketcap_and_volume') return 'highest marketcap & volume';
+      if (reason === 'highest_marketcap') return 'highest marketcap';
+      return 'top ranked token';
+    }
+
+    async function handleMintPrompt(prompt) {
+      const detection = detectMintAddress(prompt);
+      if (!detection) return false;
+      pendingDexPreference = null;
+      const preview = formatMintPreview(detection.mint);
+      const bubble = appendMessage('agent', `Building decentralized price stream for mint ${escapeHtml(preview)}…`);
+      await buildDexPriceFlow(
+        {
+          mint: detection.mint,
+          userPrompt: prompt,
+        },
+        bubble
+      );
+      return true;
+    }
+
+    function buildCexSpec(flowState) {
+      const availability = flowState?.availability || {};
+      const preferredSymbol = availability.normalized_symbol || flowState.normalizedSymbol || `${flowState.symbol}/USDT`;
+      const specSymbols = [preferredSymbol];
+      const exchanges = Array.isArray(availability.exchanges) ? availability.exchanges : [];
+      const source = {
+        type: 'ccxt',
+        symbols: specSymbols,
+        fields: ['price', 'volume', 'bid', 'ask'],
+        interval_sec: 1,
+      };
+      if (exchanges.length) {
+        source.exchanges = exchanges.map(entry => entry.exchange);
+        if (exchanges[0]?.exchange) {
+          source.exchange = exchanges[0].exchange;
+        }
+      }
+      if (availability.resolved_symbols) {
+        source.resolved_symbols = availability.resolved_symbols;
+      }
+      return {
+        symbols: specSymbols,
+        interval_sec: 1,
+        sources: [source],
+      };
+    }
+
+    async function buildDexPriceFlow(flowState, existingBubble = null) {
+      const descriptor = flowState.symbol
+        || flowState.normalizedSymbol
+        || (flowState.mint ? `mint ${formatMintPreview(flowState.mint)}` : 'token');
+      const bubble = existingBubble || appendMessage('agent', `Searching Jupiter for ${escapeHtml(descriptor)}…`);
+      const lookup = flowState.mint || flowState.symbol || flowState.normalizedSymbol;
+      if (!lookup) {
+        bubble.innerHTML = 'Need a token symbol or contract address.';
+        return;
+      }
+      try {
+        const response = await fetch(`/v1/jupiter/search?query=${encodeURIComponent(lookup)}`);
+        if (!response.ok) throw new Error(await response.text());
+        const data = await response.json();
+        const tokens = Array.isArray(data.tokens) ? data.tokens : [];
+
+        let best = null;
+        if (flowState.mint) {
+          best = tokens.find(token => token.id === flowState.mint) || null;
+        }
+        if (!best) {
+          best = data.best_token || tokens[0] || null;
+        }
+        if (!best && flowState.mint) {
+          best = {
+            id: flowState.mint,
+            contract: flowState.mint,
+            symbol: flowState.symbol || flowState.normalizedSymbol || 'TOKEN',
+            name: flowState.symbol || flowState.normalizedSymbol || 'Token',
+          };
+        }
+        if (!best) {
+          bubble.innerHTML = `No decentralized pools found for ${escapeHtml(descriptor)}.`;
+          return;
+        }
+
+        const mint = flowState.mint || best.contract || best.id;
+        if (!mint) {
+          bubble.innerHTML = `No mint discovered for ${escapeHtml(descriptor)}.`;
+          return;
+        }
+
+        const shortMint = formatMintPreview(mint);
+        const rawTicker = best.symbol || flowState.symbol || flowState.normalizedSymbol || 'TOKEN';
+        const sanitizedTicker = rawTicker.replace(/[^A-Za-z0-9/]/g, '').toUpperCase() || 'TOKEN';
+        const pairLabel = sanitizedTicker.includes('/') ? sanitizedTicker : `${sanitizedTicker}/USDC`;
+        const reasonCode = flowState.mint && best.id === flowState.mint ? 'provided_mint' : data.best_reason;
+        const reason = reasonCode === 'provided_mint'
+          ? 'provided contract address'
+          : describeBestReason(reasonCode);
+        const mcap = formatCompactNumber(best.mcap);
+        const volume = formatCompactNumber(best.volume_24h);
+        const details = [mcap ? `mcap ${mcap}` : null, volume ? `24h vol ${volume}` : null]
+          .filter(Boolean)
+          .join(' • ');
+
+        bubble.innerHTML = `
+          <div>Best Jupiter match: <strong>${escapeHtml(best.name || sanitizedTicker)}</strong> (${escapeHtml(sanitizedTicker)})</div>
+          <div>Mint: <code>${escapeHtml(mint)}</code></div>
+          <div>${escapeHtml(reason)}${details ? ` • ${escapeHtml(details)}` : ''}</div>
+          <div style="margin-top:8px;">Building decentralized price stream…</div>
+        `;
+
+        const spec = {
+          symbols: [pairLabel],
+          interval_sec: DEX_DEFAULT_INTERVAL_SEC,
+          sources: [
+            {
+              type: 'jupiter',
+              mint,
+              symbol: pairLabel,
+              token_symbol: sanitizedTicker,
+              token_name: best.name || sanitizedTicker,
+              decimals: best.decimals,
+              interval_sec: DEX_DEFAULT_INTERVAL_SEC,
+            }
+          ],
+        };
+
+        const parsed = {
+          spec,
+          reasoning: `Jupiter price stream for ${sanitizedTicker}`,
+          parsed_config: {
+            jupiter: {
+              mint: mint,
+              symbol: sanitizedTicker,
+              compact_mint: shortMint,
+              reason,
+            },
+          },
+        };
+
+        renderParseSummary(
+          parsed,
+          bubble,
+          null,
+          true,
+          flowState.userPrompt || `Price of ${descriptor}`,
+          true
+        );
+      } catch (err) {
+        bubble.innerHTML = `Unable to source Jupiter price data: ${escapeHtml(err.message || 'unknown error')}`;
+      }
+    }
+
+    async function maybeHandleTokenPricePrompt(prompt) {
+      const detection = detectTokenPricePrompt(prompt);
+      if (!detection) return false;
+
+      const bubble = appendMessage('agent', `Checking ${escapeHtml(detection.symbol)} across exchanges…`);
+      try {
+        const response = await fetch(`/v1/markets/check?symbol=${encodeURIComponent(detection.symbol)}`);
+        if (!response.ok) throw new Error(await response.text());
+        const data = await response.json();
+        const flowState = {
+          symbol: detection.symbol,
+          normalizedSymbol: data.normalized_symbol,
+          userPrompt: prompt,
+          availability: data,
+        };
+
+        if (data.listed) {
+          const venues = data.exchanges
+            .map(entry => entry.exchange?.toUpperCase())
+            .filter(Boolean)
+            .join(', ') || 'our CEX feed';
+          bubble.innerHTML = `
+            ${escapeHtml(detection.symbol)} is on ${escapeHtml(venues)}.<br>
+            Would you like it <strong>on exchange</strong> or <strong>off exchange</strong>?
+          `;
+          pendingDexPreference = flowState;
+        } else {
+          bubble.innerHTML = `${escapeHtml(detection.symbol)} is not listed on our CEX feeds. Searching Jupiter…`;
+          await buildDexPriceFlow(flowState, bubble);
+        }
+      } catch (err) {
+        bubble.innerHTML = `Could not inspect ${escapeHtml(detection.symbol)}: ${escapeHtml(err.message || 'unknown error')}`;
+      }
+      return true;
+    }
+
+    async function handleDexPreferenceResponse(userInput) {
+      if (!pendingDexPreference) return false;
+      const answer = (userInput || '').trim().toLowerCase();
+      if (!answer) {
+        appendMessage('agent', 'Please reply with "on exchange" or "off exchange".');
+        return true;
+      }
+      const flowState = pendingDexPreference;
+      if (answer.includes('on')) {
+        pendingDexPreference = null;
+        const bubble = appendMessage('agent', `Configuring on-exchange stream for ${escapeHtml(flowState.symbol)}…`);
+        const spec = buildCexSpec(flowState);
+        const parsed = {
+          spec,
+          reasoning: `On-exchange price stream for ${flowState.symbol}`,
+          parsed_config: {
+            symbols: spec.symbols,
+            exchanges: spec.sources[0]?.exchanges || [spec.sources[0]?.exchange].filter(Boolean),
+          },
+        };
+        renderParseSummary(parsed, bubble, null, true, flowState.userPrompt || `${flowState.symbol} price`, true);
+        return true;
+      }
+
+      if (answer.includes('off')) {
+        pendingDexPreference = null;
+        const bubble = appendMessage('agent', `Switching to decentralized price for ${escapeHtml(flowState.symbol)}…`);
+        await buildDexPriceFlow(flowState, bubble);
+        return true;
+      }
+
+      appendMessage('agent', 'Please reply with "on exchange" or "off exchange".');
+      return true;
     }
 
     async function tryPolymarketPlan(prompt) {
@@ -1479,13 +1774,26 @@
         return;
       }
 
+      if (await handleDexPreferenceResponse(prompt)) {
+        return;
+      }
+
       pendingPolymarketSelection = null;
       pendingPolymarketTagPrompt = null;
 
+      if (await handleMintPrompt(prompt)) {
+        return;
+      }
+
+      if (await maybeHandleTokenPricePrompt(prompt)) {
+        return;
+      }
+
       const wantsNewStream = shouldRequestNewStream(prompt);
       const targetStreamId = wantsNewStream ? null : getDefaultTargetStreamId();
+      const isEditingExisting = Boolean(targetStreamId && !wantsNewStream);
       const payload = { query: prompt };
-      if (targetStreamId) {
+      if (!isEditingExisting && targetStreamId) {
         payload.stream_id = targetStreamId;
       }
 
@@ -1496,14 +1804,20 @@
         return;
       }
       try {
-        const polymarketPlan = await tryPolymarketPlan(prompt);
-        if (polymarketPlan) {
-          const displayPrompt = polymarketPlan.search_query || prompt;
-          renderParseSummary(polymarketPlan.plan, pending, targetStreamId, wantsNewStream, displayPrompt);
-          return;
+        if (!isEditingExisting) {
+          const polymarketPlan = await tryPolymarketPlan(prompt);
+          if (polymarketPlan) {
+            const displayPrompt = polymarketPlan.search_query || prompt;
+            renderParseSummary(polymarketPlan.plan, pending, targetStreamId, wantsNewStream, displayPrompt);
+            return;
+          }
         }
 
-        const response = await fetch('/v1/streams/parse', {
+        const endpoint = isEditingExisting && targetStreamId
+          ? `/v1/streams/${targetStreamId}/edit`
+          : '/v1/streams/parse';
+
+        const response = await fetch(endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
@@ -1577,6 +1891,12 @@
             src.include_closed ? 'includes closed events' : null,
           ].filter(Boolean).join(' • ');
           detail = `${visibility}${flags ? ` • ${flags}` : ''}`;
+        } else if (src.type === 'jupiter') {
+          const mint = src.mint || src.contract || 'mint';
+          const shortMint = mint.length > 12 ? `${mint.slice(0, 6)}...${mint.slice(-4)}` : mint;
+          const cadence = src.interval_sec ? `${src.interval_sec}s` : `${spec.interval_sec || 1}s`;
+          const label = src.token_name || src.symbol || 'Jupiter token';
+          detail = `${label} • mint ${shortMint} • refresh ${cadence}`;
         } else {
           detail = Object.entries(src)
             .filter(([key]) => key !== 'type')
@@ -1998,8 +2318,11 @@
         </div>` : ''}
         ${lastEventJson ? `
         <div class="panel">
-          <h3>Latest Event</h3>
-          <pre style="max-height:220px;overflow:auto;font-family:var(--mono);font-size:12px;border:1px solid rgba(62,120,178,0.2);border-radius:12px;padding:12px;background:rgba(7,10,16,0.95);color:#d9e3f5;">${escapeHtml(lastEventJson)}</pre>
+          <h3 style="display:flex;justify-content:space-between;align-items:center;">
+            <span>Latest Event</span>
+            <button class="action-btn" onclick="copyLatestEvent('${stream.streamId}')">Copy</button>
+          </h3>
+          <pre style="max-height:220px;overflow:auto;font-family:var(--mono);font-size:12px;border:1px solid rgba(62,120,178,0.2);border-radius:12px;padding:12px;background:rgba(7,10,16,0.95);color:#d9e3f5;" id="latest-event-${stream.streamId}">${escapeHtml(lastEventJson)}</pre>
         </div>` : ''}
         <div class="panel column-merge">
           <h3>Integration Snippets</h3>
@@ -2048,6 +2371,12 @@
       } else {
         navigator.clipboard.writeText(Object.keys(schema).join(','));
       }
+    }
+
+    function copyLatestEvent(streamId) {
+      const entry = activeStreams.get(streamId);
+      if (!entry?.lastEvent) return;
+      navigator.clipboard.writeText(JSON.stringify(entry.lastEvent, null, 2));
     }
 
     function highlightSnippet(lang, code) {
@@ -2135,7 +2464,6 @@
         { name: 'price_close', type: 'float', description: 'Last trade price in window' },
         { name: 'price_avg', type: 'float', description: 'VWAP for the window' },
         { name: 'volume_sum', type: 'float', description: 'Total traded quote volume' },
-        { name: 'raw_data.exchange_data', type: 'object', description: 'Per-exchange book/trade payloads' }
       ],
       nitter: [
         { name: 'ts', type: 'timestamp', description: 'Ingestion timestamp' },
@@ -2144,7 +2472,8 @@
         { name: 'raw_data.tweet_data.timestamp_posted', type: 'string', description: 'Original tweet timestamp' },
         { name: 'raw_data.tweet_data.stats', type: 'string', description: 'Like/retweet/reply stats' },
         { name: 'raw_data.tweet_data.symbol', type: 'string', description: 'Handle or symbol extracted' },
-        { name: 'raw_data.tweet_data.event_type', type: 'string', description: 'Event type, e.g. tweet' }
+        { name: 'raw_data.tweet_data.event_type', type: 'string', description: 'Event type, e.g. tweet' },
+        { name: 'raw_data.tweet_data.tweet_type', type: 'string', description: 'tweet | retweet | quote' }
       ],
       google_trends: [
         { name: 'ts', type: 'timestamp', description: 'Collection timestamp' },

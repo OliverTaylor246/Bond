@@ -40,8 +40,28 @@ async def fetch_latest_tweet_playwright(username: str, page) -> dict | None:
             print(f"[nitter_playwright] No tweets found for @{username}")
             return None
 
-        # Get first tweet
-        first_tweet = tweets.first
+        pinned_selector = '.pinned, .pinned-tweet-label, .pinned'
+        first_tweet = None
+        is_pinned = False
+        for idx in range(min(count, 3)):
+            candidate = tweets.nth(idx)
+            if await candidate.locator(pinned_selector).count() > 0:
+                continue
+            first_tweet = candidate
+            break
+
+        if first_tweet is None:
+            first_tweet = tweets.first
+            is_pinned = await first_tweet.locator(pinned_selector).count() > 0
+
+        tweet_type = "tweet"
+        retweet_header = first_tweet.locator('.retweet-header, .retweet, .icon-retweet')
+        if await retweet_header.count() > 0:
+            tweet_type = "retweet"
+
+        quote_block = first_tweet.locator('.quote-status, .quote')
+        if await quote_block.count() > 0:
+            tweet_type = "quote" if tweet_type == "tweet" else "retweet_quote"
 
         # Extract text
         tweet_content = first_tweet.locator('.tweet-content')
@@ -65,7 +85,9 @@ async def fetch_latest_tweet_playwright(username: str, page) -> dict | None:
             'timestamp': timestamp,
             'stats': stats_text,
             'instance': NITTER_INSTANCE,
-            'fetched_at': datetime.now(tz=timezone.utc).isoformat()
+            'fetched_at': datetime.now(tz=timezone.utc).isoformat(),
+            'tweet_type': tweet_type,
+            'is_pinned': is_pinned,
         }
 
     except Exception as e:
@@ -145,7 +167,9 @@ async def nitter_playwright_stream(
                             'timestamp_posted': tweet['timestamp'],
                             'stats': tweet['stats'],
                             'instance': tweet['instance'],
-                            'event_type': 'tweet'
+                            'event_type': tweet.get('tweet_type', 'tweet'),
+                            'tweet_type': tweet.get('tweet_type', 'tweet'),
+                            'is_pinned': tweet.get('is_pinned', False),
                         }
 
                         yield evt
