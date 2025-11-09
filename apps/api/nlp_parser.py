@@ -84,7 +84,7 @@ Return this schema:
 Rules:
 {rules}
 
-Return ONLY JSON in that schema. Never rename keys. Never omit interval_sec.
+Return ONLY JSON in the appropriate schema above. Choose conversation mode for greetings/unclear requests, stream_spec mode for clear data requests.
 
 Output requirements:
 {format_instructions}
