@@ -37,6 +37,7 @@ class AgentOutput:
   handled: bool
   spec: dict[str, Any] | None = None
   reasoning: str = ""
+  confidence: float = 1.0  # 0.0 to 1.0, where 1.0 is fully confident
   metadata: dict[str, Any] = field(default_factory=dict)
 
 
@@ -46,6 +47,8 @@ class PlannerResult:
   spec: dict[str, Any] | None
   reasoning: list[str]
   agent_outputs: list[AgentOutput]
+  confidence: float = 1.0  # Overall confidence (minimum of all agents)
+  needs_confirmation: bool = False  # True if confidence < threshold
 
 
 class BaseAgent:
@@ -106,11 +109,13 @@ class ExchangeAgent(BaseAgent):
   async def run(self, ctx: PlannerContext) -> AgentOutput:
     config = await self._parse_fn(ctx.user_text, ctx.api_key, current_spec=ctx.current_spec)
     spec = build_spec_from_parsed_config(config)
+    confidence = float(config.get("confidence", 1.0))  # Extract confidence from LLM output
     return AgentOutput(
       self.name,
       handled=bool(spec.get("sources")),
       spec=spec,
       reasoning=config.get("reasoning", "Exchange agent produced base spec."),
+      confidence=confidence,
       metadata={"parsed_config": config},
     )
 
@@ -154,11 +159,21 @@ async def run_multi_agent_planner(
   combined = _merge_specs(current_spec, fragments)
   handled = bool(fragments) and bool(combined.get("sources"))
 
+  # Calculate overall confidence (minimum of all handled agents)
+  confidence_scores = [output.confidence for output in outputs if output.handled]
+  overall_confidence = min(confidence_scores) if confidence_scores else 1.0
+
+  # Set confirmation threshold (e.g., 0.8)
+  CONFIDENCE_THRESHOLD = 0.8
+  needs_confirmation = overall_confidence < CONFIDENCE_THRESHOLD
+
   return PlannerResult(
     handled=handled,
     spec=combined if combined.get("sources") else None,
     reasoning=reasoning,
     agent_outputs=outputs,
+    confidence=overall_confidence,
+    needs_confirmation=needs_confirmation,
   )
 
 

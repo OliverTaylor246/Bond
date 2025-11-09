@@ -167,6 +167,7 @@ class CreateStreamRequest(BaseModel):
   """Request to create a new stream."""
   natural_language: str | None = Field(None, description="Natural language spec")
   spec: dict[str, Any] | None = Field(None, description="Structured spec")
+  confirmed: bool = Field(False, description="Skip confidence check if user confirmed")
 
 
 class CreateStreamResponse(BaseModel):
@@ -504,6 +505,17 @@ async def create_stream(
       raise HTTPException(500, "DEEPSEEK_API_KEY not configured")
 
     planner_result = await run_multi_agent_planner(req.natural_language, api_key=api_key)
+
+    # If confidence is low and user hasn't confirmed, return confirmation request
+    if planner_result.needs_confirmation and not req.confirmed:
+      return {
+        "status": "confirmation_required",
+        "confidence": planner_result.confidence,
+        "reasoning": planner_result.reasoning,
+        "proposed_spec": planner_result.spec,
+        "message": "I'm not fully confident about this interpretation. Please confirm or clarify:",
+      }
+
     if planner_result.handled and planner_result.spec:
       spec = StreamSpec(**planner_result.spec)
     else:

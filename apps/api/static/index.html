@@ -1972,24 +1972,94 @@
               headers,
               body: JSON.stringify({
                 spec,
-                natural_language: userPrompt || undefined
+                natural_language: userPrompt || undefined,
+                confirmed: false
               }),
             });
             if (!response.ok) throw new Error(await response.text());
-            const stream = await response.json();
-            addSession(stream.stream_id, stream.ws_url, stream.spec);
-            bubble.innerHTML = `
-              Stream <code>${escapeHtml(stream.stream_id)}</code> started.
-              <div style="margin-top:10px;">
-                <a href="#" data-open-stream="${stream.stream_id}" style="color:var(--accent);text-decoration:none;">Open stream workspace →</a>
-              </div>
-            `;
-            const openLink = bubble.querySelector('[data-open-stream]');
-            if (openLink) {
-              openLink.addEventListener('click', (event) => {
-                event.preventDefault();
-                loadStream(stream.stream_id);
+            const result = await response.json();
+
+            // Handle confirmation request
+            if (result.status === 'confirmation_required') {
+              bubble.innerHTML = `
+                <div style="margin-bottom: 12px;">
+                  <strong style="color: var(--warn);">⚠️ Confirmation Required</strong>
+                  <div style="margin-top: 8px; color: var(--text-muted); font-size: 0.9em;">
+                    Confidence: ${(result.confidence * 100).toFixed(0)}%
+                  </div>
+                </div>
+                <div style="margin-bottom: 12px; color: var(--text-muted);">
+                  ${result.message}
+                </div>
+                <div style="margin-bottom: 12px;">
+                  ${result.reasoning.map(r => `<div style="margin: 4px 0;">• ${escapeHtml(r)}</div>`).join('')}
+                </div>
+                <div style="display: flex; gap: 8px; margin-top: 12px;">
+                  <button id="confirmStreamBtn" style="flex: 1; padding: 8px; background: var(--accent); color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600;">
+                    ✓ Confirm & Create
+                  </button>
+                  <button id="cancelConfirmBtn" style="flex: 1; padding: 8px; background: transparent; color: var(--text-muted); border: 1px solid var(--border); border-radius: 6px; cursor: pointer;">
+                    ✗ Cancel
+                  </button>
+                </div>
+              `;
+
+              // Handle confirm button
+              const confirmBtn = bubble.querySelector('#confirmStreamBtn');
+              confirmBtn?.addEventListener('click', async () => {
+                bubble.innerHTML = `Creating stream with confirmed spec…`;
+                try {
+                  const confirmResponse = await fetch('/v1/streams', {
+                    method: 'POST',
+                    headers,
+                    body: JSON.stringify({
+                      spec: result.proposed_spec,
+                      natural_language: userPrompt || undefined,
+                      confirmed: true
+                    }),
+                  });
+                  if (!confirmResponse.ok) throw new Error(await confirmResponse.text());
+                  const stream = await confirmResponse.json();
+                  addSession(stream.stream_id, stream.ws_url, stream.spec);
+                  bubble.innerHTML = `
+                    Stream <code>${escapeHtml(stream.stream_id)}</code> started.
+                    <div style="margin-top:10px;">
+                      <a href="#" data-open-stream="${stream.stream_id}" style="color:var(--accent);text-decoration:none;">Open stream workspace →</a>
+                    </div>
+                  `;
+                  const openLink = bubble.querySelector('[data-open-stream]');
+                  if (openLink) {
+                    openLink.addEventListener('click', (event) => {
+                      event.preventDefault();
+                      loadStream(stream.stream_id);
+                    });
+                  }
+                } catch (err) {
+                  bubble.innerHTML = `Failed to create stream: ${escapeHtml(err.message)}`;
+                }
               });
+
+              // Handle cancel button
+              const cancelBtn = bubble.querySelector('#cancelConfirmBtn');
+              cancelBtn?.addEventListener('click', () => {
+                bubble.innerHTML = `Stream creation cancelled. Please try rephrasing your request with more details.`;
+              });
+            } else {
+              // Normal stream creation (high confidence)
+              addSession(result.stream_id, result.ws_url, result.spec);
+              bubble.innerHTML = `
+                Stream <code>${escapeHtml(result.stream_id)}</code> started.
+                <div style="margin-top:10px;">
+                  <a href="#" data-open-stream="${result.stream_id}" style="color:var(--accent);text-decoration:none;">Open stream workspace →</a>
+                </div>
+              `;
+              const openLink = bubble.querySelector('[data-open-stream]');
+              if (openLink) {
+                openLink.addEventListener('click', (event) => {
+                  event.preventDefault();
+                  loadStream(result.stream_id);
+                });
+              }
             }
           } catch (err) {
             bubble.innerHTML = `Failed to launch: ${escapeHtml(err.message)}`;

@@ -50,7 +50,8 @@ Output schema (all keys required):
     {{"type": "nitter", "username": "elonmusk", "interval_sec": 1.0}}
   ],
   "interval_sec": 1.0,
-  "reasoning": "short natural language explanation"
+  "reasoning": "short natural language explanation",
+  "confidence": 0.95
 }}
 
 Rules:
@@ -77,6 +78,11 @@ _RULES = """1. Use any cryptocurrency ticker the user mentions (convert names to
 7. Single-asset asks should include price, volume, high, low fields.
 8. Handle "fastest refresh rate"/"fastest possible" as 0.1 seconds.
 9. If tweets or @handles are requested, add a nitter source with the username.
+10. Set "confidence" field (0.0-1.0) based on:
+    - 0.9-1.0: Clear, specific request with known symbols/sources
+    - 0.7-0.9: Reasonable interpretation but some ambiguity
+    - 0.5-0.7: Vague request, multiple interpretations possible
+    - Below 0.5: Unclear request, missing critical information
 10. Default Twitter handles: elonmusk, vitalikbuterin, cz_binance.
 11. If user only wants tweets/social data, leave symbols/exchanges empty and only return the relevant sources.
 12. Always return compliant JSON with keys: symbols, exchanges, additional_sources, interval_sec, reasoning.
