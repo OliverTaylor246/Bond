@@ -877,6 +877,14 @@ async def parse_nl_stream(req: NLParseRequest):
     current_spec = runtime.get_stream_spec(req.stream_id).model_dump()
 
   planner_result = await run_multi_agent_planner(req.query, api_key=api_key, current_spec=current_spec)
+
+  # Handle conversation mode
+  if planner_result.conversation_message:
+    return {
+      "conversation": True,
+      "message": planner_result.conversation_message,
+    }
+
   if planner_result.handled and planner_result.spec:
     return NLParseResponse(
       spec=planner_result.spec,
@@ -886,6 +894,13 @@ async def parse_nl_stream(req: NLParseRequest):
 
   try:
     config = await parse_stream_request(req.query, api_key, current_spec=current_spec)
+
+    # Check if conversation mode
+    if config.get("mode") == "conversation":
+      return {
+        "conversation": True,
+        "message": config.get("message", ""),
+      }
 
     spec = build_spec_from_parsed_config(config)
 

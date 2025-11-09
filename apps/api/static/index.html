@@ -1824,6 +1824,17 @@
         });
         if (!response.ok) throw new Error(await response.text());
         const parsed = await response.json();
+
+        // Handle conversational response
+        if (parsed.conversation) {
+          pending.innerHTML = `
+            <div style="color: var(--text); line-height: 1.6;">
+              ${escapeHtml(parsed.message)}
+            </div>
+          `;
+          return;
+        }
+
         renderParseSummary(parsed, pending, targetStreamId, wantsNewStream, prompt);
       } catch (err) {
         pending.innerHTML = `
