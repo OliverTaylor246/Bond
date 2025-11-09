@@ -506,6 +506,13 @@ async def create_stream(
 
     planner_result = await run_multi_agent_planner(req.natural_language, api_key=api_key)
 
+    # If this is a conversational response, return it directly
+    if planner_result.conversation_message:
+      return {
+        "status": "conversation",
+        "message": planner_result.conversation_message,
+      }
+
     # If confidence is low and user hasn't confirmed, return confirmation request
     if planner_result.needs_confirmation and not req.confirmed:
       return {

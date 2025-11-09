@@ -49,6 +49,7 @@ class PlannerResult:
   agent_outputs: list[AgentOutput]
   confidence: float = 1.0  # Overall confidence (minimum of all agents)
   needs_confirmation: bool = False  # True if confidence < threshold
+  conversation_message: str | None = None  # Set when LLM chooses conversational mode
 
 
 class BaseAgent:
@@ -108,8 +109,22 @@ class ExchangeAgent(BaseAgent):
 
   async def run(self, ctx: PlannerContext) -> AgentOutput:
     config = await self._parse_fn(ctx.user_text, ctx.api_key, current_spec=ctx.current_spec)
+
+    # Check if LLM chose conversational mode
+    mode = config.get("mode", "stream_spec")
+    if mode == "conversation":
+      return AgentOutput(
+        self.name,
+        handled=False,  # Not handling as a stream request
+        spec=None,
+        reasoning="Conversational response",
+        confidence=1.0,
+        metadata={"conversation_message": config.get("message", "")},
+      )
+
+    # Stream spec mode
     spec = build_spec_from_parsed_config(config)
-    confidence = float(config.get("confidence", 1.0))  # Extract confidence from LLM output
+    confidence = float(config.get("confidence", 1.0))
     return AgentOutput(
       self.name,
       handled=bool(spec.get("sources")),
@@ -142,6 +157,7 @@ async def run_multi_agent_planner(
   fragments: list[dict[str, Any]] = []
   reasoning: list[str] = []
   outputs: list[AgentOutput] = []
+  conversation_message: str | None = None
 
   for agent in agents:
     try:
@@ -151,6 +167,21 @@ async def run_multi_agent_planner(
       continue
 
     outputs.append(result)
+
+    # Check if this is a conversational response
+    if result.metadata.get("conversation_message"):
+      conversation_message = result.metadata["conversation_message"]
+      # Return immediately in conversation mode
+      return PlannerResult(
+        handled=False,
+        spec=None,
+        reasoning=[],
+        agent_outputs=outputs,
+        confidence=1.0,
+        needs_confirmation=False,
+        conversation_message=conversation_message,
+      )
+
     if result.handled and result.spec:
       fragments.append(result.spec)
       if result.reasoning:
@@ -174,6 +205,7 @@ async def run_multi_agent_planner(
     agent_outputs=outputs,
     confidence=overall_confidence,
     needs_confirmation=needs_confirmation,
+    conversation_message=None,
   )
 
 

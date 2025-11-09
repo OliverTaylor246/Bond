@@ -38,8 +38,35 @@ Available options:
 Existing stream spec context (use as baseline when provided):
 {current_context}
 
-Output schema (all keys required):
+You have two response modes:
+
+**Mode 1: Conversational (when request is unclear or just greeting/chat)**
+Return this schema:
 {{
+  "mode": "conversation",
+  "message": "your helpful conversational response here"
+}}
+
+Use this mode when:
+- User is greeting you (hello, hi, hey)
+- Request is too vague to create a stream
+- User is asking what you can do
+- User needs guidance on available data sources
+
+In your message, be helpful and guide them toward the data sources you can access:
+- Exchanges: binanceus, binance, kraken, kucoin
+- Cryptocurrency prices, volume, and market data
+- Polymarket prediction markets
+- Solana DEX data via Jupiter
+- Twitter mentions and sentiment
+- On-chain data
+- Google Trends
+- Liquidation feeds
+
+**Mode 2: Stream Specification (when request is clear enough)**
+Return this schema:
+{{
+  "mode": "stream_spec",
   "symbols": ["BTC", "ETH"],
   "exchanges": [
     {{"exchange": "binanceus", "fields": ["price", "volume", "high", "low"]}}
@@ -69,7 +96,8 @@ Output requirements:
     ),
 ])
 
-_RULES = """1. Use any cryptocurrency ticker the user mentions (convert names to uppercase symbols).
+_RULES = """**For stream_spec mode:**
+1. Use any cryptocurrency ticker the user mentions (convert names to uppercase symbols).
 2. "All crypto" style requests should map to the popular symbols list.
 3. Binance US is the default exchange and ["price", "volume"] the default fields unless specified.
 4. Interpret refresh hints: "realtime"/"fastest" -> 0.1, "live"/"right now"/"current" -> 1 second.
@@ -83,12 +111,17 @@ _RULES = """1. Use any cryptocurrency ticker the user mentions (convert names to
     - 0.7-0.9: Reasonable interpretation but some ambiguity
     - 0.5-0.7: Vague request, multiple interpretations possible
     - Below 0.5: Unclear request, missing critical information
-10. Default Twitter handles: elonmusk, vitalikbuterin, cz_binance.
-11. If user only wants tweets/social data, leave symbols/exchanges empty and only return the relevant sources.
-12. Always return compliant JSON with keys: symbols, exchanges, additional_sources, interval_sec, reasoning.
+11. Default Twitter handles: elonmusk, vitalikbuterin, cz_binance.
+12. If user only wants tweets/social data, leave symbols/exchanges empty and only return the relevant sources.
 13. When an existing stream spec is provided, start from it and only change the parts the user requested—preserve other symbols, sources, and intervals.
 14. Treat additive requests ("add tweets", "include Google Trends") as augmentations unless the user explicitly asks to replace or remove sources.
 15. Mentioning "Polymarket", "prediction markets", or "event odds" adds a polymarket source (track all events by default unless the user specifies filters).
+
+**For conversation mode:**
+1. Use this mode for greetings (hello, hi, hey), vague requests, or questions about capabilities.
+2. Be conversational and helpful - guide the user toward making a specific data stream request.
+3. Suggest examples like "track BTC price", "show me Elon's tweets", "Polymarket election odds".
+4. Keep messages concise and actionable.
 """
 
 _AVAILABLE_OPTIONS_TEXT = f"""- Symbols: {AVAILABLE_OPTIONS['symbols']}

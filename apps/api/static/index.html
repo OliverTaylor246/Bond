@@ -1979,6 +1979,18 @@
             if (!response.ok) throw new Error(await response.text());
             const result = await response.json();
 
+            // Handle conversational response
+            if (result.status === 'conversation') {
+              bubble.innerHTML = `
+                <div style="padding: 12px 0;">
+                  <div style="color: var(--text); line-height: 1.6;">
+                    ${escapeHtml(result.message)}
+                  </div>
+                </div>
+              `;
+              return;
+            }
+
             // Handle confirmation request
             if (result.status === 'confirmation_required') {
               bubble.innerHTML = `
