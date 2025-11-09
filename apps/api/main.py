@@ -857,12 +857,13 @@ class NLParseResponse(BaseModel):
   parsed_config: dict[str, Any]
 
 
-@app.post("/v1/streams/parse", response_model=NLParseResponse)
+@app.post("/v1/streams/parse")
 async def parse_nl_stream(req: NLParseRequest):
   """
   Parse natural language into stream configuration.
 
   Example: "show me live btc prices" -> structured stream spec
+  Returns either a conversation response or a stream spec.
   """
   api_key = os.getenv("DEEPSEEK_API_KEY")
   if not api_key:
@@ -880,35 +881,35 @@ async def parse_nl_stream(req: NLParseRequest):
 
   # Handle conversation mode
   if planner_result.conversation_message:
-    return {
+    return JSONResponse({
       "conversation": True,
       "message": planner_result.conversation_message,
-    }
+    })
 
   if planner_result.handled and planner_result.spec:
-    return NLParseResponse(
+    return JSONResponse(NLParseResponse(
       spec=planner_result.spec,
       reasoning=" ".join(planner_result.reasoning),
       parsed_config={"agent_outputs": [asdict(output) for output in planner_result.agent_outputs]},
-    )
+    ).model_dump())
 
   try:
     config = await parse_stream_request(req.query, api_key, current_spec=current_spec)
 
     # Check if conversation mode
     if config.get("mode") == "conversation":
-      return {
+      return JSONResponse({
         "conversation": True,
         "message": config.get("message", ""),
-      }
+      })
 
     spec = build_spec_from_parsed_config(config)
 
-    return NLParseResponse(
+    return JSONResponse(NLParseResponse(
       spec=spec,
       reasoning=config.get("reasoning", ""),
       parsed_config=config
-    )
+    ).model_dump())
 
   except Exception as e:
     raise HTTPException(400, f"Failed to parse request: {str(e)}")
