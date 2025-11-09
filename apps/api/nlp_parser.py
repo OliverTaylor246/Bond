@@ -24,70 +24,46 @@ AVAILABLE_OPTIONS = {
     }
 }
 
-_FORMATTER = JsonOutputParser()
-
 _PROMPT = ChatPromptTemplate.from_messages([
     (
         "system",
-        """You are a financial data stream configuration assistant that maps user goals \
-into a structured JSON object. Use only the provided catalog of options.
+        """You are a financial data stream configuration assistant.
+
+You have TWO response modes - choose the appropriate one:
+
+**Mode 1: Conversational (for greetings, questions, unclear requests)**
+When the user says hello, asks what you can do, or their request is vague, respond conversationally.
+Return ONLY this JSON:
+{{
+  "mode": "conversation",
+  "message": "Hi! I help you create real-time data streams. I can track: cryptocurrency prices from exchanges (Binance, Kraken, etc.), Polymarket prediction markets, Solana DEX data, Twitter mentions, Google Trends, and more. What would you like to track?"
+}}
+
+**Mode 2: Stream Specification (for clear data requests)**
+When the user has a clear request like "track BTC price" or "show me Elon's tweets", create a stream spec.
 
 Available options:
 {available_options}
 
-Existing stream spec context (use as baseline when provided):
-{current_context}
-
-You have two response modes:
-
-**Mode 1: Conversational (when request is unclear or just greeting/chat)**
-Return this schema:
-{{
-  "mode": "conversation",
-  "message": "your helpful conversational response here"
-}}
-
-Use this mode when:
-- User is greeting you (hello, hi, hey)
-- Request is too vague to create a stream
-- User is asking what you can do
-- User needs guidance on available data sources
-
-In your message, be helpful and guide them toward the data sources you can access:
-- Exchanges: binanceus, binance, kraken, kucoin
-- Cryptocurrency prices, volume, and market data
-- Polymarket prediction markets
-- Solana DEX data via Jupiter
-- Twitter mentions and sentiment
-- On-chain data
-- Google Trends
-- Liquidation feeds
-
-**Mode 2: Stream Specification (when request is clear enough)**
-Return this schema:
+Return this JSON schema:
 {{
   "mode": "stream_spec",
   "symbols": ["BTC", "ETH"],
-  "exchanges": [
-    {{"exchange": "binanceus", "fields": ["price", "volume", "high", "low"]}}
-  ],
-  "additional_sources": [
-    "twitter",
-    "google_trends",
-    {{"type": "nitter", "username": "elonmusk", "interval_sec": 1.0}}
-  ],
+  "exchanges": [{{"exchange": "binanceus", "fields": ["price", "volume"]}}],
+  "additional_sources": [],
   "interval_sec": 1.0,
-  "reasoning": "short natural language explanation",
+  "reasoning": "explanation",
   "confidence": 0.95
 }}
 
 Rules:
 {rules}
 
-Return ONLY JSON in the appropriate schema above. Choose conversation mode for greetings/unclear requests, stream_spec mode for clear data requests.
+Current context: {current_context}
 
-Output requirements:
-{format_instructions}
+CRITICAL: For greetings like "hello", "hi", "hey" - use mode: "conversation".
+For data requests - use mode: "stream_spec".
+Return ONLY valid JSON, nothing else.
 """,
     ),
     (
@@ -166,11 +142,13 @@ async def parse_stream_request(
     prompt = _PROMPT.partial(
         available_options=_AVAILABLE_OPTIONS_TEXT,
         rules=_RULES,
-        format_instructions=_FORMATTER.get_format_instructions(),
         current_context=_format_current_spec(current_spec),
     )
 
-    chain = prompt | llm | _FORMATTER
+    # Use JsonOutputParser to parse the JSON response
+    from langchain_core.output_parsers import JsonOutputParser
+    parser = JsonOutputParser()
+    chain = prompt | llm | parser
 
     config = await chain.ainvoke({"user_request": user_input})
     print("[nlp_parser] Parsed configuration:", config, flush=True)
