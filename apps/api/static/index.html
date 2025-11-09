@@ -2417,21 +2417,6 @@
           </h3>
           <pre style="max-height:220px;overflow:auto;font-family:var(--mono);font-size:12px;border:1px solid rgba(62,120,178,0.2);border-radius:12px;padding:12px;background:rgba(7,10,16,0.95);color:#d9e3f5;" id="latest-event-${stream.streamId}">${escapeHtml(lastEventJson)}</pre>
         </div>` : ''}
-        <div class="panel column-merge">
-          <h3>Integration Snippets</h3>
-          <div class="code-block">
-            <button onclick="copySnippet('python-${stream.streamId}')">Copy</button>
-            <pre><code id="python-${stream.streamId}"></code></pre>
-          </div>
-          <div class="code-block">
-            <button onclick="copySnippet('ws-${stream.streamId}')">Copy</button>
-            <pre><code id="ws-${stream.streamId}"></code></pre>
-          </div>
-          <div class="code-block">
-            <button onclick="copySnippet('curl-${stream.streamId}')">Copy</button>
-            <pre><code id="curl-${stream.streamId}"></code></pre>
-          </div>
-        </div>
         <div class="panel">
           <h3>Actions</h3>
           <div class="actions-list">
@@ -2442,15 +2427,6 @@
           </div>
         </div>
       `;
-
-      const pythonSnippet = `from ekko import listen\n\nasync def main():\n    async for event in listen("${stream.streamId}"):\n        print(event)`;
-      const wsActual = stream.wsUrl.replace('localhost', window.location.hostname);
-      const wsDisplay = wsActual.replace(/token=.*$/i, 'token=***');
-      const curlSnippet = `curl -X GET "https://api.bond.dev/v1/streams/${stream.streamId}" \\\n     -H "Authorization: Bearer <token>"`;
-
-      setSnippet(`python-${stream.streamId}`, 'python', pythonSnippet);
-      setSnippet(`ws-${stream.streamId}`, 'url', wsActual, wsDisplay);
-      setSnippet(`curl-${stream.streamId}`, 'shell', curlSnippet);
 
     }
 
