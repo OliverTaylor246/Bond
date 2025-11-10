@@ -1765,6 +1765,14 @@
       }
     }
 
+    // Submit on Enter (but allow Shift+Enter for new line)
+    messageInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' && !event.shiftKey) {
+        event.preventDefault();
+        chatForm.requestSubmit();
+      }
+    });
+
     chatForm.addEventListener('submit', async (event) => {
       event.preventDefault();
       const prompt = messageInput.value.trim();
