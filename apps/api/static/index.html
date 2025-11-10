@@ -307,21 +307,25 @@
     .chat-input {
       padding: 18px 22px 22px;
       display: flex;
-      flex-direction: column;
-      gap: 12px;
+      flex-direction: row;
+      align-items: flex-end;
+      gap: 0;
       background: rgba(20, 25, 33, 0.88);
       flex-shrink: 0;
       order: 3;
+      position: relative;
     }
 
     .chat-input textarea {
-      min-height: 70px;
+      flex: 1;
+      min-height: 44px;
+      max-height: 120px;
       resize: none;
       border-radius: 14px;
       background: rgba(14, 18, 26, 0.9);
       border: 1px solid rgba(62,120,178,0.24);
       color: var(--text);
-      padding: 12px 14px;
+      padding: 12px 60px 12px 14px;
       font-size: 13px;
       line-height: 1.6;
     }
@@ -334,12 +338,14 @@
     }
 
     .chat-input button {
-      align-self: flex-end;
-      border-radius: 12px;
-      border: 1px solid rgba(62,120,178,0.32);
-      background: rgba(62,120,178,0.22);
+      position: absolute;
+      right: 28px;
+      bottom: 24px;
+      border-radius: 8px;
+      border: none;
+      background: rgba(0,75,168,0.8);
       color: #e2ecff;
-      padding: 8px 16px;
+      padding: 8px 14px;
       font-size: 12px;
       font-weight: 500;
       cursor: pointer;
@@ -347,7 +353,7 @@
     }
 
     .chat-input button:hover {
-      background: rgba(62,120,178,0.32);
+      background: rgba(0,75,168,1);
     }
 
     .detail-pane {
