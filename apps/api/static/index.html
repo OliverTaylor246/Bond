@@ -2393,6 +2393,7 @@
           <h3>Stream Metadata</h3>
           <dl>
             <dt>Stream ID</dt><dd>${escapeHtml(stream.streamId)}</dd>
+            <dt>WebSocket URL</dt><dd style="word-break:break-all;font-family:var(--mono);font-size:11px;">${escapeHtml(stream.wsUrl || 'N/A')}</dd>
             <dt>Status</dt><dd>${escapeHtml(stream.status)}</dd>
             <dt>Interval</dt><dd>${interval}s</dd>
             <dt>Latency</dt><dd>${latency}</dd>
