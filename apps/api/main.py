@@ -4,7 +4,6 @@ REST endpoints to create and manage streams.
 """
 import asyncio
 import os
-import re
 import time
 from contextlib import asynccontextmanager
 from dataclasses import asdict
@@ -54,127 +53,6 @@ TIER_LIMITS = {
 
 SYMBOL_CACHE_TTL = int(os.getenv("SYMBOL_CACHE_TTL", "600"))
 _symbol_cache: dict[tuple[str, str], tuple[float, dict[str, list[str]]]] = {}
-
-DATA_KEYWORDS = tuple({
-  "price", "prices", "stream", "feed", "track", "tracking", "chart",
-  "charts", "volume", "volumes", "bid", "ask", "spread", "tweet",
-  "tweets", "twitter", "nitter", "google trends", "trends", "trend",
-  "polymarket", "market", "markets", "liquidation", "liquidations",
-  "dex", "cex", "exchange", "exchanges", "orderbook", "order book",
-  "btc", "bitcoin", "eth", "ethereum", "sol", "solana", "doge",
-  "shib", "crypto", "token", "tokens", "coin", "coins", "perp",
-  "perps", "future", "futures", "onchain", "on-chain", "jupiter",
-  "binance", "kraken", "okx", "bybit", "interval", "seconds",
-  "sec", "s", "ms", "refresh", "window", "candle", "candles",
-  "faster", "slower", "speed", "latency",
-})
-GREETINGS = (
-  "hi", "hello", "hey", "gm", "good morning", "good afternoon",
-  "good evening", "yo", "sup"
-)
-SMALLTALK_KEYWORDS = ("thanks", "thank you", "how are you", "who are you", "what can you do")
-QUESTION_PREFIXES = ("what", "who", "how", "why", "when", "tell me", "explain", "do you")
-MATH_PATTERN = re.compile(
-  r"(-?\d+(?:\.\d+)?)\s*(?:\b(?:plus|minus|times|x|multiplied by|divided by|over)\b|[+\-*/])\s*(-?\d+(?:\.\d+)?)",
-  re.IGNORECASE,
-)
-CONVERSATION_HELP_MESSAGE = (
-  "I build real-time market data streams (prices, volume, tweets, Polymarket, on-chain). "
-  "Let me know which symbols or sources you want me to track so I can help."
-)
-
-
-def _truncate_prompt(text: str, limit: int = 160) -> str:
-  snippet = text.strip()
-  if len(snippet) <= limit:
-    return snippet
-  return snippet[: limit - 3] + "..."
-
-
-def _contains_data_keyword(text: str) -> bool:
-  lowered = text.lower()
-  return any(keyword in lowered for keyword in DATA_KEYWORDS)
-
-
-def _solve_simple_math_expression(text: str) -> str | None:
-  match = MATH_PATTERN.search(text or "")
-  if not match:
-    return None
-  try:
-    left = float(match.group(1))
-    right = float(match.group(2))
-  except (ValueError, TypeError):
-    return None
-
-  operator_match = match.group(0)
-  operator = ""
-  for token in ("+", "-", "*", "/", "plus", "minus", "times", "x", "multiplied by", "divided by", "over"):
-    if token in operator_match.lower():
-      operator = token
-      break
-
-  if operator in ("+", "plus"):
-    result = left + right
-    symbol = "+"
-  elif operator in ("-", "minus"):
-    result = left - right
-    symbol = "-"
-  elif operator in ("*", "times", "x", "multiplied by"):
-    result = left * right
-    symbol = "*"
-  elif operator in ("/", "divided by", "over"):
-    if right == 0:
-      return None
-    result = left / right
-    symbol = "/"
-  else:
-    return None
-
-  if result.is_integer():
-    result_str = str(int(result))
-  else:
-    result_str = f"{result:.4f}".rstrip("0").rstrip(".")
-
-  def _fmt(value: float) -> str:
-    if value.is_integer():
-      return str(int(value))
-    text = f"{value:.6f}".rstrip("0").rstrip(".")
-    return text or str(value)
-
-  return f"{_fmt(left)} {symbol} { _fmt(right)} = {result_str}"
-
-
-def detect_conversation_message(user_text: str | None) -> str | None:
-  if not user_text or not user_text.strip():
-    return CONVERSATION_HELP_MESSAGE
-
-  stripped = user_text.strip()
-  lowered = stripped.lower()
-
-  math_reply = _solve_simple_math_expression(lowered)
-  if math_reply:
-    return (
-      f"{math_reply}. "
-      "Beyond quick math, I focus on spinning up crypto data streams (prices, tweets, Polymarket, on-chain). "
-      "Tell me which markets or sources you'd like me to monitor."
-    )
-
-  for greeting in GREETINGS:
-    if lowered == greeting or lowered.startswith(f"{greeting} "):
-      return CONVERSATION_HELP_MESSAGE
-
-  for phrase in SMALLTALK_KEYWORDS:
-    if phrase in lowered:
-      return CONVERSATION_HELP_MESSAGE
-
-  question_like = "?" in lowered or any(lowered.startswith(prefix) for prefix in QUESTION_PREFIXES)
-  if not _contains_data_keyword(lowered) and (question_like or len(stripped.split()) <= 4):
-    return (
-      f"I can help by creating real-time data streams for crypto markets. "
-      f'Could you specify the symbols or sources you want me to track so I can assist with "{_truncate_prompt(stripped)}"?'
-    )
-
-  return None
 
 
 @asynccontextmanager
@@ -621,12 +499,6 @@ async def create_stream(
 
   # Compile spec
   if req.natural_language:
-    conversation_message = detect_conversation_message(req.natural_language)
-    if conversation_message:
-      return {
-        "status": "conversation",
-        "message": conversation_message,
-      }
     # Use DeepSeek NL parser instead of basic parser
     api_key = os.getenv("DEEPSEEK_API_KEY")
     if not api_key:
@@ -997,13 +869,6 @@ async def parse_nl_stream(req: NLParseRequest):
   if not api_key:
     raise HTTPException(500, "DEEPSEEK_API_KEY not configured")
 
-  conversation_message = detect_conversation_message(req.query)
-  if conversation_message:
-    return JSONResponse({
-      "conversation": True,
-      "message": conversation_message,
-    })
-
   current_spec: dict[str, Any] | None = None
   if req.stream_id:
     if not runtime:
@@ -1064,16 +929,14 @@ async def edit_stream_nl(stream_id: str, req: NLParseRequest):
   if not runtime.is_running(stream_id):
     raise HTTPException(404, f"Stream {stream_id} not found")
 
-  conversation_message = detect_conversation_message(req.query)
-  if conversation_message:
-    return JSONResponse({
-      "conversation": True,
-      "message": conversation_message,
-    })
-
   current_spec = runtime.get_stream_spec(stream_id).model_dump()
 
   planner_result = await run_multi_agent_planner(req.query, api_key=api_key, current_spec=current_spec)
+  if planner_result.conversation_message:
+    return JSONResponse({
+      "conversation": True,
+      "message": planner_result.conversation_message,
+    })
   if planner_result.handled and planner_result.spec:
     return NLParseResponse(
       spec=planner_result.spec,

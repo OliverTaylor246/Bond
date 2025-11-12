@@ -5,6 +5,7 @@ from user intent and merges them into a final specification.
 from __future__ import annotations
 
 import copy
+import json
 import re
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Iterable
@@ -19,8 +20,49 @@ from apps.api.polymarket import (
 )
 from apps.api.spec_builder import build_spec_from_parsed_config, normalize_symbol
 from apps.api.nlp_parser import parse_stream_request
+from langchain_core.output_parsers import JsonOutputParser
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_openai import ChatOpenAI
 
 SOLANA_MINT_REGEX = re.compile(r"\b[1-9A-HJ-NP-Za-km-z]{32,44}\b")
+
+DEFAULT_CONVERSATION_MESSAGE = (
+  "I build real-time crypto data streams (prices, tweets, Polymarket, on-chain). "
+  "Tell me which symbols or sources you'd like me to track."
+)
+DEFAULT_CLARIFICATION_MESSAGE = (
+  "Can you clarify which assets or data sources you want to monitor so I can set up the right stream?"
+)
+
+INTENT_PROMPT = ChatPromptTemplate.from_messages([
+  (
+    "system",
+    """You are the intent-classification agent for the 3KK0 market data assistant.\n"
+    "Decide whether the user's latest message should be treated as a conversation, a clarification request, or a stream action.\n"
+    "\n"
+    "Definitions:\n"
+    "- conversation: greetings, small talk, math questions, or any request unrelated to configuring data streams.\n"
+    "- clarification: the user wants stream data but their instructions are incomplete or ambiguous.\n"
+    "- action: a clear instruction to create, update, or inspect data streams (symbols, intervals, sources, etc.).\n"
+    "\n"
+    "If the mode is conversation or clarification, craft a short message (<50 words) responding appropriately.\n"
+    "For conversation: be friendly and remind them what you can do.\n"
+    "For clarification: politely ask the missing details (symbols, timeframe, sources, etc.).\n"
+    "For action: no message is required.\n"
+    "\n"
+    "Return ONLY JSON in this schema:\n"
+    "{\n"
+    "  \"mode\": \"conversation|clarification|action\",\n"
+    "  \"message\": \"string (required for conversation/clarification, optional for action)\"\n"
+    "}\n"
+    """,
+  ),
+  (
+    "human",
+    "Current stream context (if any):\n{current_context}\n\n"
+    "User message: {user_text}",
+  ),
+])
 
 
 @dataclass
@@ -57,6 +99,96 @@ class BaseAgent:
 
   async def run(self, ctx: PlannerContext) -> AgentOutput:  # pragma: no cover - interface
     raise NotImplementedError
+
+
+def _format_context(spec: dict[str, Any] | None, limit: int = 1200) -> str:
+  if not spec:
+    return "No active stream."
+  try:
+    text = json.dumps(spec, indent=2)
+  except (TypeError, ValueError):
+    text = str(spec)
+  if len(text) <= limit:
+    return text
+  return text[: limit - 3] + "..."
+
+
+class IntentAgent(BaseAgent):
+  name = "intent"
+
+  async def run(self, ctx: PlannerContext) -> AgentOutput:
+    user_text = (ctx.user_text or "").strip()
+    if not user_text:
+      return AgentOutput(
+        self.name,
+        handled=False,
+        spec=None,
+        reasoning="Empty prompt treated as conversation",
+        metadata={
+          "conversation_message": DEFAULT_CONVERSATION_MESSAGE,
+          "intent_mode": "conversation",
+        },
+      )
+
+    parser = JsonOutputParser()
+    llm = ChatOpenAI(
+      model="deepseek-chat",
+      temperature=0.0,
+      max_tokens=256,
+      api_key=ctx.api_key,
+      base_url="https://api.deepseek.com/v1",
+      timeout=20,
+    )
+    chain = INTENT_PROMPT.partial(current_context=_format_context(ctx.current_spec)) | llm | parser
+
+    try:
+      result = await chain.ainvoke({"user_text": user_text})
+    except Exception as exc:  # pragma: no cover - intent fallback
+      return AgentOutput(
+        self.name,
+        handled=False,
+        reasoning=f"intent agent error: {exc}",
+        metadata={"intent_mode": "action"},
+      )
+
+    mode = str(result.get("mode", "action")).strip().lower()
+    message = (result.get("message") or "").strip()
+
+    if mode == "conversation":
+      if not message:
+        message = DEFAULT_CONVERSATION_MESSAGE
+      return AgentOutput(
+        self.name,
+        handled=False,
+        spec=None,
+        reasoning="conversation response",
+        metadata={
+          "conversation_message": message,
+          "intent_mode": "conversation",
+        },
+      )
+
+    if mode == "clarification":
+      if not message:
+        message = DEFAULT_CLARIFICATION_MESSAGE
+      return AgentOutput(
+        self.name,
+        handled=False,
+        spec=None,
+        reasoning="clarification needed",
+        metadata={
+          "conversation_message": message,
+          "intent_mode": "clarification",
+        },
+      )
+
+    return AgentOutput(
+      self.name,
+      handled=False,
+      spec=None,
+      reasoning="actionable request",
+      metadata={"intent_mode": "action"},
+    )
 
 
 class DexAgent(BaseAgent):
@@ -149,6 +281,7 @@ async def run_multi_agent_planner(
 
   ctx = PlannerContext(user_text=user_text, api_key=api_key, current_spec=current_spec)
   agents: list[BaseAgent] = [
+    IntentAgent(),
     DexAgent(),
     PolymarketAgent(),
     ExchangeAgent(parse_stream_request),
