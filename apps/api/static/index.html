@@ -1035,6 +1035,20 @@
     };
     const FIELD_PICKER_BASE_FIELDS = ['ts', 'symbol', 'exchange'];
     const FIELD_PICKER_ID_SET = new Set(FIELD_PICKER_OPTIONS.map(opt => opt.id));
+    const FIELD_PICKER_LABEL_MAP = FIELD_PICKER_OPTIONS.reduce((acc, option) => {
+      acc[option.id] = option.label;
+      return acc;
+    }, {});
+    const FIELD_PICKER_SYNONYMS = {
+      price_avg: ['price', 'last price', 'spot price', 'current price', 'mid price'],
+      volume_sum: ['volume', 'volumes'],
+      bid_avg: ['bid', 'best bid'],
+      ask_avg: ['ask', 'best ask'],
+      price_high: ['high', 'day high'],
+      price_low: ['low', 'day low'],
+      price_open: ['open', 'opening price'],
+      price_close: ['close', 'closing price'],
+    };
 
     const activeStreams = new Map();
     let currentStreamId = null;
@@ -1449,6 +1463,26 @@
       return true;
     }
 
+    function extractRequestedFieldIds(text) {
+      if (!text) return [];
+      const normalized = text.toLowerCase();
+      const matches = new Set();
+      Object.entries(FIELD_PICKER_SYNONYMS).forEach(([fieldId, synonyms]) => {
+        if (synonyms.some(keyword => normalized.includes(keyword))) {
+          matches.add(fieldId);
+        }
+      });
+      return Array.from(matches);
+    }
+
+    function formatFieldList(ids) {
+      if (!ids?.length) return '';
+      const labels = ids.map(id => FIELD_PICKER_LABEL_MAP[id] || id);
+      if (labels.length === 1) return labels[0];
+      if (labels.length === 2) return `${labels[0]} and ${labels[1]}`;
+      return `${labels.slice(0, -1).join(', ')}, and ${labels.at(-1)}`;
+    }
+
     function hasCcxtSource(spec) {
       return Array.isArray(spec?.sources) && spec.sources.some(src => src?.type === 'ccxt');
     }
@@ -1470,7 +1504,7 @@
       return true;
     }
 
-    function deriveDefaultFieldSelection(spec) {
+    function deriveDefaultFieldSelection(spec, userPrompt = '') {
       const defaults = new Set();
       const projectTransform = getProjectTransform(spec);
       if (projectTransform && Array.isArray(projectTransform.fields)) {
@@ -1480,7 +1514,12 @@
           }
         });
       }
-      if (hasCcxtSource(spec)) {
+
+      if (!defaults.size && userPrompt) {
+        extractRequestedFieldIds(userPrompt).forEach(fieldId => defaults.add(fieldId));
+      }
+
+      if (!defaults.size && hasCcxtSource(spec)) {
         spec.sources.forEach(src => {
           if (src?.type !== 'ccxt' || !Array.isArray(src.fields)) return;
           src.fields.forEach(field => {
@@ -1490,6 +1529,7 @@
           });
         });
       }
+
       if (!defaults.size) {
         const fallback = FIELD_PICKER_OPTIONS.find(opt => opt.default) || FIELD_PICKER_OPTIONS[0];
         if (fallback) defaults.add(fallback.id);
@@ -1514,7 +1554,11 @@
 
     function renderFieldSelection(parsed, bubble, preferredStreamId, forcedNew, userPrompt) {
       const spec = parsed?.spec || {};
-      const defaults = deriveDefaultFieldSelection(spec);
+      const defaults = deriveDefaultFieldSelection(spec, userPrompt);
+      const requestedFields = extractRequestedFieldIds(userPrompt).filter(id => FIELD_PICKER_ID_SET.has(id));
+      const summaryText = requestedFields.length
+        ? `You asked for ${escapeHtml(formatFieldList(requestedFields))}. Confirm or add any other metrics you want.`
+        : 'Select the metrics you want in this stream. Last price is checked by default.';
       const optionsHtml = FIELD_PICKER_OPTIONS.map(option => {
         const checked = defaults.includes(option.id) ? 'checked' : '';
         return `
@@ -1530,10 +1574,8 @@
 
       bubble.innerHTML = `
         <div style="margin-bottom:10px;">
-          <strong>Do you only need the last price?</strong>
-          <div style="font-size:13px;color:#94a3b8;margin-top:4px;">
-            Select the metrics you want in your stream. You can uncheck anything you don't need.
-          </div>
+          <strong>Confirm the metrics you need</strong>
+          <div style="font-size:13px;color:#94a3b8;margin-top:4px;">${summaryText}</div>
         </div>
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px;">
           ${optionsHtml}
@@ -1549,7 +1591,7 @@
         const selected = Array.from(bubble.querySelectorAll('input[data-field-option]:checked'))
           .map(input => input.getAttribute('data-field-option'))
           .filter(Boolean);
-        const finalSelection = selected.length ? selected : ['price_avg'];
+        const finalSelection = selected.length ? selected : deriveDefaultFieldSelection(spec, userPrompt);
         applyFieldSelectionToSpec(parsed, finalSelection);
         parsed.__fieldPickerCompleted = true;
         renderParseSummary(parsed, bubble, preferredStreamId, forcedNew, userPrompt, false, true);
