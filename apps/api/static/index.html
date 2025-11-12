@@ -1170,6 +1170,43 @@
       }
     }
 
+    function normalizeSymbolText(symbol) {
+      if (!symbol) return null;
+      const trimmed = symbol.trim().toUpperCase();
+      if (!trimmed) return null;
+      return trimmed.includes('/') ? trimmed : `${trimmed}/USDT`;
+    }
+
+    function mergeClientSpecs(baseSpec, patchSpec) {
+      const base = cloneSpec(baseSpec) || { sources: [], symbols: [] };
+      const merged = base;
+
+      const baseSymbols = Array.isArray(merged.symbols) ? merged.symbols.slice() : [];
+      const uniqueSymbols = new Set(baseSymbols.map(normalizeSymbolText).filter(Boolean));
+      const patchSymbols = Array.isArray(patchSpec?.symbols) ? patchSpec.symbols : [];
+      patchSymbols.forEach(sym => {
+        const normalized = normalizeSymbolText(sym);
+        if (normalized && !uniqueSymbols.has(normalized)) {
+          uniqueSymbols.add(normalized);
+        }
+      });
+      merged.symbols = Array.from(uniqueSymbols);
+
+      const baseSources = Array.isArray(merged.sources) ? merged.sources : [];
+      const patchSources = Array.isArray(patchSpec?.sources) ? patchSpec.sources : [];
+      merged.sources = baseSources.concat(patchSources.map(src => ({ ...src })));
+
+      if (patchSpec?.interval_sec) {
+        merged.interval_sec = patchSpec.interval_sec;
+      }
+
+      if (patchSpec?.transforms) {
+        merged.transforms = patchSpec.transforms;
+      }
+
+      return merged;
+    }
+
     function detectTokenPricePrompt(text) {
       if (!text) return null;
       const normalized = text.trim();
@@ -1903,12 +1940,14 @@
     }
 
     function getDefaultTargetStreamId() {
+      const streamIds = Array.from(activeStreams.keys());
+      if (!streamIds.length) {
+        return null;
+      }
       if (currentStreamId && activeStreams.has(currentStreamId)) {
         return currentStreamId;
       }
-      const iterator = activeStreams.keys();
-      const first = iterator.next();
-      return first.done ? null : first.value;
+      return streamIds[streamIds.length - 1];
     }
 
     function shouldRequestNewStream(text) {
@@ -2046,7 +2085,10 @@
     });
 
     function renderParseSummary(parsed, bubble, preferredStreamId = null, forcedNew = false, userPrompt = '', skipPolymarketPrompt = false, skipFieldPrompt = false) {
-      const spec = parsed.spec || { sources: [], symbols: [], interval_sec: 1 };
+      let spec = parsed.spec || { sources: [], symbols: [], interval_sec: 1 };
+      if (spec && Array.isArray(spec.symbols)) {
+        spec.symbols = Array.from(new Set(spec.symbols.map(sym => sym.toUpperCase())));
+      }
       const sources = Array.isArray(spec.sources) ? spec.sources : [];
       const ccxtSources = sources.filter(src => src.type === 'ccxt');
       const otherSources = sources.filter(src => src.type !== 'ccxt');
@@ -2079,6 +2121,11 @@
       const targetLabel = targetStream
         ? ` (${escapeHtml((targetStream.spec.symbols || []).join(', ') || targetStreamId.slice(0, 8))})`
         : '';
+
+      if (allowUpdate && targetStream?.spec) {
+        spec = mergeClientSpecs(targetStream.spec, spec);
+        parsed.spec = spec;
+      }
 
       const rows = ccxtSources.map(src => `
         <tr>
