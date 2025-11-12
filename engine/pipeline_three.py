@@ -209,7 +209,7 @@ class MultiSourcePipeline:
       self.last_emit_ts = latest_ts
       self.latest_event_ts = latest_ts
 
-    agg_event = self._build_aggregated_event(
+    agg_events = self._build_aggregated_events(
       latest_ts,
       trade_events,
       tweet_events,
@@ -217,9 +217,47 @@ class MultiSourcePipeline:
     )
 
     if self.dispatcher:
-      payload = agg_event.model_dump()
-      payload = self._apply_transforms(payload)
-      await self.dispatcher.publish(self.stream_id, payload)
+      for agg_event in agg_events:
+        payload = agg_event.model_dump()
+        payload = self._apply_transforms(payload)
+        await self.dispatcher.publish(self.stream_id, payload)
+
+  def _build_aggregated_events(
+    self,
+    latest_ts: datetime,
+    trade_events: list[dict],
+    tweet_events: list[dict],
+    custom_events: list[dict],
+  ) -> list[AggregatedEvent]:
+    """Build aggregated events, splitting by symbol when multiple symbols are present."""
+    if not trade_events:
+      return [
+        self._build_aggregated_event(
+          latest_ts,
+          trade_events,
+          tweet_events,
+          custom_events,
+        )
+      ]
+
+    grouped: dict[str, list[dict]] = {}
+    for event in trade_events:
+      symbol = event.get("symbol") or "__default__"
+      grouped.setdefault(symbol, []).append(event)
+
+    events: list[AggregatedEvent] = []
+    for symbol, events_for_symbol in grouped.items():
+      symbol_override = None if symbol == "__default__" else symbol
+      events.append(
+        self._build_aggregated_event(
+          latest_ts,
+          events_for_symbol,
+          tweet_events,
+          custom_events,
+          symbol_override=symbol_override,
+        )
+      )
+    return events
 
   def _build_aggregated_event(
     self,
@@ -227,6 +265,8 @@ class MultiSourcePipeline:
     trade_events: list[dict],
     tweet_events: list[dict],
     custom_events: list[dict],
+    *,
+    symbol_override: Optional[str] = None,
   ) -> AggregatedEvent:
     """Calculate aggregates and build AggregatedEvent model."""
     prices = [e["price"] for e in trade_events if "price" in e]
@@ -294,6 +334,8 @@ class MultiSourcePipeline:
     symbols_seen = sorted({
       e.get("symbol") for e in trade_events if e.get("symbol")
     })
+    if symbol_override and symbol_override not in symbols_seen:
+      symbols_seen.insert(0, symbol_override)
 
     onchain_values = [
       e.get("value", 0)
@@ -315,7 +357,7 @@ class MultiSourcePipeline:
           'event_type': 'tweet',
         }
 
-    primary_symbol = symbols_seen[0] if symbols_seen else None
+    primary_symbol = symbol_override or (symbols_seen[0] if symbols_seen else None)
     primary_exchange = trade_events[-1].get("source") if trade_events else None
 
     agg_event = AggregatedEvent(
