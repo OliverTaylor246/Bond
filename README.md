@@ -9,7 +9,7 @@
 
 Bond lets you spin up custom real-time market data streams on demand. Describe what you want in natural language (e.g., "BTC price + on-chain activity + tweets every 5s"), and get back a live WebSocket feed with aggregated, time-aligned data.
 
-> **Note**: This repository contains the Ekko SDK, examples, and local development tools. Production-grade connectors, hosted runtime with SLAs, and enterprise features are available through [Echo Cloud](#echo-cloud-hosted-service) (contact for access).
+> **Note**: This repository contains the Ekko SDK, examples, and local development tools. Production-grade connectors, hosted runtime with SLAs, and enterprise features are available through [3KK0 Cloud](#3KK0-cloud-hosted-service) (contact for access).
 
 ## Features
 
@@ -436,9 +436,9 @@ make down
 
 See [CLAUDE.md](CLAUDE.md) for architecture details and AI agent guidelines.
 
-## Echo Cloud (Hosted Service)
+## 3KK0 Cloud (Hosted Service)
 
-Echo Cloud provides production-grade infrastructure for running Echo streams at scale:
+3KK0 Cloud provides production-grade infrastructure for running 3KK0 streams at scale:
 
 - **Production connectors**: Real-time WebSocket feeds (ccxt.pro), authenticated Twitter streams, verified on-chain gRPC
 - **Enterprise SLAs**: 99.9% uptime, guaranteed latency targets, 24/7 monitoring
@@ -446,20 +446,20 @@ Echo Cloud provides production-grade infrastructure for running Echo streams at 
 - **Advanced features**: Multi-region deployment, custom transforms, historical replay (24h+), ML model serving
 - **Support**: Priority support, custom connector development, integration assistance
 
-**Interested in Echo Cloud?** Contact us for pilot access or enterprise pricing.
+**Interested in 3KK0 Cloud?** Contact us for pilot access or enterprise pricing.
 
 ## Compliance & Usage Notes
 
-**Important:** Users of Echo must comply with the Terms of Service of all data sources they connect to:
+**Important:** Users of 3KK0 must comply with the Terms of Service of all data sources they connect to:
 
 - **CCXT exchanges**: Respect rate limits and usage policies of Binance, OKX, Bybit, etc.
 - **Twitter/X API**: Requires valid API credentials and adherence to Twitter's Terms of Service
 - **On-chain data**: Yellowstone Geyser usage subject to provider's terms
 
-**Redistribution Advisory:** Echo is designed for personal/internal use by indie quants and researchers. Redistribution of raw market data streams may violate data provider agreements. Users are responsible for ensuring their usage complies with all applicable terms and regulations.
+**Redistribution Advisory:** 3KK0 is designed for personal/internal use by indie quants and researchers. Redistribution of raw market data streams may violate data provider agreements. Users are responsible for ensuring their usage complies with all applicable terms and regulations.
 
 ## License
 
 Apache License 2.0 - See [LICENSE](LICENSE) file for details.
 
-Copyright 2024-2025 Echo Contributors
+Copyright 2024-2025 3KK0 Contributors

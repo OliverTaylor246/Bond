@@ -79,7 +79,7 @@ _RULES = """**For stream_spec mode:**
 4. Interpret refresh hints: "realtime"/"fastest" -> 0.1, "live"/"right now"/"current" -> 1 second.
 5. Mentioning "twitter"/"social" adds twitter source; "search interest"/"trends" adds google_trends.
 6. Detect all crypto names mentioned (bitcoin -> BTC, ethereum -> ETH, etc.).
-7. Single-asset asks should include price, volume, high, low fields.
+7. Include only the metrics the user explicitly requests. If they say “price”, set fields to ["price"]. Add volume, bid/ask, etc. *only* when the user asks for them (e.g., “price and volume”, “bid/ask spread”).
 8. Handle "fastest refresh rate"/"fastest possible" as 0.1 seconds.
 9. If tweets or @handles are requested, add a nitter source with the username.
 10. Set "confidence" field (0.0-1.0) based on:
