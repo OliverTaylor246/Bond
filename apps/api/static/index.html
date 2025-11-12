@@ -1013,18 +1013,18 @@
     const DEX_DEFAULT_INTERVAL_SEC = 2;
     const viewClasses = ['view-chat', 'view-streams', 'view-history', 'view-stream-detail'];
     const FIELD_PICKER_OPTIONS = [
-      { id: 'price_avg', label: 'Last price', description: 'Current aggregated price (default)', default: true },
+      { id: 'price_close', label: 'Last price', description: 'Most recent trade in the window (default)', default: true },
+      { id: 'price_avg', label: 'Average price', description: 'Mean of all trades in the window' },
       { id: 'bid_avg', label: 'Best bid', description: 'Top of book bid across venues' },
       { id: 'ask_avg', label: 'Best ask', description: 'Top of book ask across venues' },
       { id: 'volume_sum', label: 'Volume', description: 'Quote volume inside the window' },
       { id: 'price_high', label: 'High', description: 'Window high price' },
       { id: 'price_low', label: 'Low', description: 'Window low price' },
       { id: 'price_open', label: 'Open', description: 'First price in window' },
-      { id: 'price_close', label: 'Close', description: 'Last price in window' },
     ];
     const FIELD_PICKER_FIELD_MAP = {
-      price: 'price_avg',
-      last: 'price_avg',
+      price: 'price_close',
+      last: 'price_close',
       volume: 'volume_sum',
       bid: 'bid_avg',
       ask: 'ask_avg',
@@ -1040,7 +1040,8 @@
       return acc;
     }, {});
     const FIELD_PICKER_SYNONYMS = {
-      price_avg: ['price', 'last price', 'spot price', 'current price', 'mid price'],
+      price_close: ['price', 'last price', 'spot price', 'current price', 'mid price', 'close'],
+      price_avg: ['average price', 'mean price'],
       volume_sum: ['volume', 'volumes'],
       bid_avg: ['bid', 'best bid'],
       ask_avg: ['ask', 'best ask'],
