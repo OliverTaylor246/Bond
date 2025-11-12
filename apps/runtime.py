@@ -486,7 +486,12 @@ class StreamRuntime:
       add_ccxt_source({"symbols": symbols})
       add_twitter_source({})
 
-    pipeline = MultiSourcePipeline(stream_id, interval, self.dispatcher)
+    pipeline = MultiSourcePipeline(
+      stream_id,
+      interval,
+      self.dispatcher,
+      transforms=spec.transforms,
+    )
 
     try:
       print(

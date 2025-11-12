@@ -1012,6 +1012,29 @@
     const VIEW_DETAIL = 'stream-detail';
     const DEX_DEFAULT_INTERVAL_SEC = 2;
     const viewClasses = ['view-chat', 'view-streams', 'view-history', 'view-stream-detail'];
+    const FIELD_PICKER_OPTIONS = [
+      { id: 'price_avg', label: 'Last price', description: 'Current aggregated price (default)', default: true },
+      { id: 'bid_avg', label: 'Best bid', description: 'Top of book bid across venues' },
+      { id: 'ask_avg', label: 'Best ask', description: 'Top of book ask across venues' },
+      { id: 'volume_sum', label: 'Volume', description: 'Quote volume inside the window' },
+      { id: 'price_high', label: 'High', description: 'Window high price' },
+      { id: 'price_low', label: 'Low', description: 'Window low price' },
+      { id: 'price_open', label: 'Open', description: 'First price in window' },
+      { id: 'price_close', label: 'Close', description: 'Last price in window' },
+    ];
+    const FIELD_PICKER_FIELD_MAP = {
+      price: 'price_avg',
+      last: 'price_avg',
+      volume: 'volume_sum',
+      bid: 'bid_avg',
+      ask: 'ask_avg',
+      high: 'price_high',
+      low: 'price_low',
+      open: 'price_open',
+      close: 'price_close',
+    };
+    const FIELD_PICKER_BASE_FIELDS = ['ts', 'symbol', 'exchange'];
+    const FIELD_PICKER_ID_SET = new Set(FIELD_PICKER_OPTIONS.map(opt => opt.id));
 
     const activeStreams = new Map();
     let currentStreamId = null;
@@ -1347,7 +1370,8 @@
           null,
           true,
           flowState.userPrompt || `Price of ${descriptor}`,
-          true
+          true,
+          false
         );
       } catch (err) {
         bubble.innerHTML = `Unable to source Jupiter price data: ${escapeHtml(err.message || 'unknown error')}`;
@@ -1410,7 +1434,7 @@
             exchanges: spec.sources[0]?.exchanges || [spec.sources[0]?.exchange].filter(Boolean),
           },
         };
-        renderParseSummary(parsed, bubble, null, true, flowState.userPrompt || `${flowState.symbol} price`, true);
+        renderParseSummary(parsed, bubble, null, true, flowState.userPrompt || `${flowState.symbol} price`, true, false);
         return true;
       }
 
@@ -1615,7 +1639,8 @@
           pending.preferredStreamId,
           pending.forcedNew,
           pending.displayPrompt || pending.userPrompt || '',
-          true
+          true,
+          false
         );
         return true;
       }
@@ -1673,7 +1698,8 @@
         pending.preferredStreamId,
         pending.forcedNew,
         pending.displayPrompt || pending.userPrompt || '',
-        true
+        true,
+        false
       );
       return true;
     }
@@ -1714,6 +1740,7 @@
         pending.preferredStreamId,
         pending.forcedNew,
         pending.userPrompt || '',
+        false,
         false
       );
       return true;
@@ -1862,13 +1889,18 @@
       }
     });
 
-    function renderParseSummary(parsed, bubble, preferredStreamId = null, forcedNew = false, userPrompt = '', skipPolymarketPrompt = false) {
+    function renderParseSummary(parsed, bubble, preferredStreamId = null, forcedNew = false, userPrompt = '', skipPolymarketPrompt = false, skipFieldPrompt = false) {
       const spec = parsed.spec || { sources: [], symbols: [], interval_sec: 1 };
       const sources = Array.isArray(spec.sources) ? spec.sources : [];
       const ccxtSources = sources.filter(src => src.type === 'ccxt');
       const otherSources = sources.filter(src => src.type !== 'ccxt');
       const polymarketMissingTag = polymarketSourcesMissingTag(sources);
       const pendingPolymarket = polymarketSourcesNeedingSelection(sources);
+
+      if (shouldPromptFieldSelection(spec, parsed, skipFieldPrompt)) {
+        renderFieldSelection(parsed, bubble, preferredStreamId, forcedNew, userPrompt);
+        return;
+      }
 
       if (polymarketMissingTag.length && !skipPolymarketPrompt) {
         promptPolymarketTag(parsed, bubble, preferredStreamId, forcedNew, userPrompt);
@@ -2377,8 +2409,121 @@
             <span>Latency: ${latency}</span>
             <span>Created: ${created ? created.toISOString() : '—'}</span>
           </div>
-        `;
+      `;
+    }
+
+    function hasCcxtSource(spec) {
+      return Array.isArray(spec?.sources) && spec.sources.some(src => src?.type === 'ccxt');
+    }
+
+    function getProjectTransform(spec) {
+      if (!Array.isArray(spec?.transforms)) return null;
+      return spec.transforms.find(
+        transform => transform && String(transform.op || transform.type).toLowerCase() === 'project'
+      ) || null;
+    }
+
+    function shouldPromptFieldSelection(spec, parsed, skipFieldPrompt) {
+      if (skipFieldPrompt || parsed?.__fieldPickerCompleted) {
+        return false;
       }
+      if (!hasCcxtSource(spec)) {
+        return false;
+      }
+      return true;
+    }
+
+    function deriveDefaultFieldSelection(spec) {
+      const defaults = new Set();
+      const projectTransform = getProjectTransform(spec);
+      if (projectTransform && Array.isArray(projectTransform.fields)) {
+        projectTransform.fields.forEach(field => {
+          if (!FIELD_PICKER_BASE_FIELDS.includes(field) && FIELD_PICKER_ID_SET.has(field)) {
+            defaults.add(field);
+          }
+        });
+      }
+      if (hasCcxtSource(spec)) {
+        spec.sources.forEach(src => {
+          if (src?.type !== 'ccxt' || !Array.isArray(src.fields)) return;
+          src.fields.forEach(field => {
+            if (!field) return;
+            const mapped = FIELD_PICKER_FIELD_MAP[String(field).toLowerCase()];
+            if (mapped) defaults.add(mapped);
+          });
+        });
+      }
+      if (!defaults.size) {
+        const fallback = FIELD_PICKER_OPTIONS.find(opt => opt.default) || FIELD_PICKER_OPTIONS[0];
+        if (fallback) defaults.add(fallback.id);
+      }
+      return Array.from(defaults);
+    }
+
+    function applyFieldSelectionToSpec(parsed, selectedIds) {
+      const spec = parsed?.spec;
+      if (!spec) return;
+      const filtered = (selectedIds || []).filter(id => FIELD_PICKER_ID_SET.has(id));
+      const unique = Array.from(new Set([...FIELD_PICKER_BASE_FIELDS, ...filtered]));
+      let transforms = Array.isArray(spec.transforms)
+        ? spec.transforms.filter(transform => transform && String(transform.op || transform.type).toLowerCase() !== 'project')
+        : [];
+      transforms.unshift({
+        op: 'project',
+        fields: unique,
+      });
+      spec.transforms = transforms;
+    }
+
+    function renderFieldSelection(parsed, bubble, preferredStreamId, forcedNew, userPrompt) {
+      const spec = parsed?.spec || {};
+      const defaults = deriveDefaultFieldSelection(spec);
+      const optionsHtml = FIELD_PICKER_OPTIONS.map(option => {
+        const checked = defaults.includes(option.id) ? 'checked' : '';
+        return `
+          <label style="display:flex;align-items:flex-start;gap:10px;padding:8px 10px;border:1px solid rgba(62,120,178,0.25);border-radius:10px;background:rgba(62,120,178,0.08);">
+            <input type="checkbox" data-field-option="${option.id}" ${checked}>
+            <div>
+              <div style="font-weight:600;">${escapeHtml(option.label)}</div>
+              <div style="font-size:12px;color:#94a3b8;">${escapeHtml(option.description || '')}</div>
+            </div>
+          </label>
+        `;
+      }).join('');
+
+      bubble.innerHTML = `
+        <div style="margin-bottom:10px;">
+          <strong>Do you only need the last price?</strong>
+          <div style="font-size:13px;color:#94a3b8;margin-top:4px;">
+            Select the metrics you want in your stream. You can uncheck anything you don't need.
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px;">
+          ${optionsHtml}
+        </div>
+        <div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap;">
+          <button id="fieldPickerApply" style="border:1px solid rgba(16,185,129,0.4);background:rgba(16,185,129,0.18);color:#d1fae5;padding:8px 16px;border-radius:999px;font-size:13px;cursor:pointer;">Apply metrics</button>
+          <button id="fieldPickerSkip" style="border:1px solid rgba(148,163,184,0.35);background:transparent;color:#cbd5f5;padding:8px 14px;border-radius:999px;font-size:13px;cursor:pointer;">Keep all metrics</button>
+        </div>
+      `;
+
+      const applyBtn = bubble.querySelector('#fieldPickerApply');
+      applyBtn?.addEventListener('click', () => {
+        const selected = Array.from(bubble.querySelectorAll('input[data-field-option]:checked'))
+          .map(input => input.getAttribute('data-field-option'))
+          .filter(Boolean);
+        const finalSelection = selected.length ? selected : deriveDefaultFieldSelection(spec);
+        applyFieldSelectionToSpec(parsed, finalSelection);
+        parsed.__fieldPickerCompleted = true;
+        renderParseSummary(parsed, bubble, preferredStreamId, forcedNew, userPrompt, false, true);
+      });
+
+      const skipBtn = bubble.querySelector('#fieldPickerSkip');
+      skipBtn?.addEventListener('click', () => {
+        parsed.__fieldPickerCompleted = true;
+        renderParseSummary(parsed, bubble, preferredStreamId, forcedNew, userPrompt, false, true);
+      });
+    }
 
       streamStatus.style.display = 'inline-flex';
       streamStatus.textContent = stream.status;

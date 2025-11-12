@@ -107,10 +107,22 @@ class MultiSourcePipeline:
     stream_id: str,
     interval_sec: float = 5,
     dispatcher: Optional[RedisDispatcher] = None,
+    transforms: Optional[list[dict[str, Any]]] = None,
   ):
     self.stream_id = stream_id
     self.interval_sec = interval_sec
     self.dispatcher = dispatcher
+    self.transforms: list[dict[str, Any]] = []
+    if transforms:
+      for transform in transforms:
+        if transform is None:
+          continue
+        if hasattr(transform, "model_dump"):
+          self.transforms.append(transform.model_dump())
+        elif hasattr(transform, "dict"):
+          self.transforms.append(transform.dict())
+        elif isinstance(transform, dict):
+          self.transforms.append(dict(transform))
 
     self.trade_buffer: list[dict[str, Any]] = []
     self.social_buffer: list[dict[str, Any]] = []
@@ -205,7 +217,9 @@ class MultiSourcePipeline:
     )
 
     if self.dispatcher:
-      await self.dispatcher.publish(self.stream_id, agg_event.model_dump())
+      payload = agg_event.model_dump()
+      payload = self._apply_transforms(payload)
+      await self.dispatcher.publish(self.stream_id, payload)
 
   def _build_aggregated_event(
     self,
@@ -301,6 +315,9 @@ class MultiSourcePipeline:
           'event_type': 'tweet',
         }
 
+    primary_symbol = symbols_seen[0] if symbols_seen else None
+    primary_exchange = trade_events[-1].get("source") if trade_events else None
+
     agg_event = AggregatedEvent(
       ts=latest_ts,
       window_start=latest_ts - timedelta(seconds=self.interval_sec),
@@ -313,6 +330,8 @@ class MultiSourcePipeline:
       bid_avg=bid_avg,
       ask_avg=ask_avg,
       volume_sum=volume_sum,
+      symbol=primary_symbol,
+      exchange=primary_exchange,
       tweets=len(tweet_events),
       onchain_count=len(custom_events),
       onchain_value_sum=onchain_value_sum,
@@ -350,6 +369,23 @@ class MultiSourcePipeline:
       return ts.replace(tzinfo=timezone.utc)
     return ts.astimezone(timezone.utc)
 
+  def _apply_transforms(self, payload: dict[str, Any]) -> dict[str, Any]:
+    """Apply optional transforms (currently supports 'project')."""
+    if not self.transforms:
+      return payload
+
+    current = payload
+    for transform in self.transforms:
+      if not isinstance(transform, dict):
+        continue
+      op = transform.get("op")
+      if op == "project":
+        fields = transform.get("fields") or []
+        if not fields:
+          continue
+        current = {field: current[field] for field in fields if field in current}
+    return current
+
 
 # Backwards compatibility alias
 ThreeSourcePipeline = MultiSourcePipeline
@@ -360,6 +396,7 @@ async def run_pipeline(
   sources: list[SourceConfig],
   interval_sec: float = 5,
   redis_url: str = "redis://localhost:6379",
+  transforms: Optional[list[dict[str, Any]]] = None,
 ) -> None:
   """
   Convenience function to run the full pipeline with its own dispatcher.
@@ -367,7 +404,7 @@ async def run_pipeline(
   dispatcher = RedisDispatcher(redis_url)
   await dispatcher.connect()
 
-  pipeline = MultiSourcePipeline(stream_id, interval_sec, dispatcher)
+  pipeline = MultiSourcePipeline(stream_id, interval_sec, dispatcher, transforms=transforms)
 
   try:
     await pipeline.ingest(sources)

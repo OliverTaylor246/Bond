@@ -116,6 +116,10 @@ class AggregatedEvent(BaseModel):
   # Volume
   volume_sum: Optional[float] = None
 
+  # Identity metadata
+  symbol: Optional[str] = None
+  exchange: Optional[str] = None
+
   # Social & on-chain
   tweets: int = 0
   onchain_count: int = 0
