@@ -1549,7 +1549,7 @@
         const selected = Array.from(bubble.querySelectorAll('input[data-field-option]:checked'))
           .map(input => input.getAttribute('data-field-option'))
           .filter(Boolean);
-        const finalSelection = selected.length ? selected : deriveDefaultFieldSelection(spec);
+        const finalSelection = selected.length ? selected : ['price_avg'];
         applyFieldSelectionToSpec(parsed, finalSelection);
         parsed.__fieldPickerCompleted = true;
         renderParseSummary(parsed, bubble, preferredStreamId, forcedNew, userPrompt, false, true);

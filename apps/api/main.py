@@ -498,7 +498,9 @@ async def create_stream(
     raise HTTPException(429, message)
 
   # Compile spec
-  if req.natural_language:
+  if req.spec:
+    spec = compile_spec(req.spec)
+  elif req.natural_language:
     # Use DeepSeek NL parser instead of basic parser
     api_key = os.getenv("DEEPSEEK_API_KEY")
     if not api_key:
@@ -528,8 +530,6 @@ async def create_stream(
     else:
       config = await parse_stream_request(req.natural_language, api_key)
       spec = StreamSpec(**build_spec_from_parsed_config(config))
-  elif req.spec:
-    spec = compile_spec(req.spec)
   else:
     raise HTTPException(400, "Must provide natural_language or spec")
 
