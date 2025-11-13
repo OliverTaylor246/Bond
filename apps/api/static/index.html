@@ -1642,6 +1642,28 @@
       });
     }
 
+    function openStreamEditor(stream) {
+      if (!stream || !stream.spec) return;
+      setView(VIEW_CHAT);
+      if (messageInput) {
+        messageInput.focus({ preventScroll: true });
+      }
+      const symbolsLabel = (stream.spec.symbols || []).join(', ') || stream.streamId;
+      const bubble = appendMessage('agent', `
+        Editing stream <code>${escapeHtml(stream.streamId)}</code>
+        <div style="font-size:12px;color:#94a3b8;margin-top:4px;">${escapeHtml(symbolsLabel)}</div>
+      `);
+      const parsed = {
+        spec: cloneSpec(stream.spec),
+        reasoning: `Modify stream ${symbolsLabel}`,
+        parsed_config: {
+          edit_stream_id: stream.streamId,
+        },
+      };
+      parsed.__fieldPickerCompleted = true;
+      renderParseSummary(parsed, bubble, stream.streamId, false, `Edit ${symbolsLabel}`, true, true);
+    }
+
     async function tryPolymarketPlan(prompt) {
       try {
         const response = await fetch('/v1/polymarket/plan', {
@@ -2640,6 +2662,9 @@
             <dt>Type</dt><dd>AggregatedEvent</dd>
             <dt>Last price</dt><dd>${latestPrice != null ? '$' + latestPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'}</dd>
           </dl>
+          <div style="margin-top:12px;">
+            <button class="action-btn" data-edit-stream="${stream.streamId}">Edit This Stream</button>
+          </div>
         </div>
         <div class="panel">
           <h3>Data Schema</h3>
@@ -2672,6 +2697,11 @@
           <pre style="max-height:220px;overflow:auto;font-family:var(--mono);font-size:12px;border:1px solid rgba(62,120,178,0.2);border-radius:12px;padding:12px;background:rgba(7,10,16,0.95);color:#d9e3f5;" id="latest-event-${stream.streamId}">${escapeHtml(lastEventJson)}</pre>
         </div>` : ''}
       `;
+
+      const editButton = detailBody.querySelector('[data-edit-stream]');
+      if (editButton) {
+        editButton.addEventListener('click', () => openStreamEditor(stream));
+      }
 
     }
 
