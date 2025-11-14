@@ -1442,6 +1442,7 @@
             },
           },
         };
+        markSpecForMerge(parsed);
 
         renderParseSummary(
           parsed,
@@ -1513,6 +1514,7 @@
             exchanges: spec.sources[0]?.exchanges || [spec.sources[0]?.exchange].filter(Boolean),
           },
         };
+        markSpecForMerge(parsed);
         renderParseSummary(parsed, bubble, null, true, flowState.userPrompt || `${flowState.symbol} price`, true, false);
         return true;
       }
@@ -1615,6 +1617,11 @@
         fields: unique,
       });
       spec.transforms = transforms;
+    }
+
+    function markSpecForMerge(parsed) {
+      if (!parsed) return;
+      parsed.__mergeWithExisting = true;
     }
 
     function renderFieldSelection(parsed, bubble, preferredStreamId, forcedNew, userPrompt) {
@@ -2171,9 +2178,12 @@
         ? ` (${escapeHtml((targetStream.spec.symbols || []).join(', ') || targetStreamId.slice(0, 8))})`
         : '';
 
-      if (allowUpdate && targetStream?.spec) {
+      const wantsMerge = Boolean(parsed?.__mergeWithExisting);
+      if (allowUpdate && wantsMerge && targetStream?.spec) {
         spec = mergeClientSpecs(targetStream.spec, spec);
         parsed.spec = spec;
+      } else if (!wantsMerge && parsed?.__mergeWithExisting) {
+        delete parsed.__mergeWithExisting;
       }
 
       const rows = ccxtSources.map(src => `
