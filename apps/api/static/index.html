@@ -1177,6 +1177,32 @@
       return trimmed.includes('/') ? trimmed : `${trimmed}/USDT`;
     }
 
+    function dedupeSources(sources) {
+      const result = [];
+      const seen = new Set();
+      sources.forEach(src => {
+        if (!src) return;
+        const clone = { ...src };
+        if (Array.isArray(clone.symbols)) {
+          clone.symbols = clone.symbols.map(normalizeSymbolText).filter(Boolean);
+        }
+        const keyPayload = {
+          type: clone.type || 'custom',
+          symbols: (clone.symbols || []).slice().sort(),
+          exchange: clone.exchange || null,
+          exchanges: Array.isArray(clone.exchanges) ? clone.exchanges.slice().sort() : null,
+          fields: Array.isArray(clone.fields) ? clone.fields.slice().sort() : null,
+          interval_sec: clone.interval_sec || null,
+          market_type: clone.market_type || null,
+        };
+        const key = JSON.stringify(keyPayload);
+        if (seen.has(key)) return;
+        seen.add(key);
+        result.push(clone);
+      });
+      return result;
+    }
+
     function mergeClientSpecs(baseSpec, patchSpec) {
       const base = cloneSpec(baseSpec) || { sources: [], symbols: [] };
       const merged = base;
@@ -1194,7 +1220,8 @@
 
       const baseSources = Array.isArray(merged.sources) ? merged.sources : [];
       const patchSources = Array.isArray(patchSpec?.sources) ? patchSpec.sources : [];
-      merged.sources = baseSources.concat(patchSources.map(src => ({ ...src })));
+      const combinedSources = baseSources.concat(patchSources.map(src => ({ ...src })));
+      merged.sources = dedupeSources(combinedSources);
 
       if (patchSpec?.interval_sec) {
         merged.interval_sec = patchSpec.interval_sec;
