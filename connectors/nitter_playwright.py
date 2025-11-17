@@ -5,7 +5,17 @@ Handles JavaScript challenges and bot protection.
 import asyncio
 from datetime import datetime, timezone
 from typing import AsyncIterator
-from playwright.async_api import async_playwright
+
+
+def _load_async_playwright():
+    try:
+        from playwright.async_api import async_playwright
+
+        return async_playwright
+    except ImportError as exc:  # pragma: no cover - optional LLM dependency
+        raise RuntimeError(
+            "playwright is required for the Nitter Playwright connector; install it with `pip install playwright`"
+        ) from exc
 
 
 NITTER_INSTANCE = "nitter.poast.org"
@@ -114,6 +124,7 @@ async def nitter_playwright_stream(
     print(f"[nitter_playwright] Starting stream for @{username} (interval: {interval}s)")
 
     # Launch browser once and keep it alive
+    async_playwright = _load_async_playwright()
     async with async_playwright() as p:
         # Use headless mode with evasion techniques
         browser = await p.chromium.launch(
@@ -209,6 +220,7 @@ async def nitter_playwright_multi_users(
     last_tweets = {user: None for user in usernames}
 
     # Launch browser once and keep it alive
+    async_playwright = _load_async_playwright()
     async with async_playwright() as p:
         browser = await p.chromium.launch(
             headless=True,

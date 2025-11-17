@@ -5,7 +5,17 @@ Tracks search interest for keywords over time using pytrends.
 import asyncio
 from datetime import datetime, timezone
 from typing import AsyncIterator, Optional
-from pytrends.request import TrendReq
+
+
+def _load_pytrends():
+    try:
+        from pytrends.request import TrendReq
+
+        return TrendReq
+    except ImportError as exc:  # pragma: no cover - requires optional LLM deps
+        raise RuntimeError(
+            "pytrends is required for the Google Trends connector; install it with `pip install pytrends`"
+        ) from exc
 
 
 async def google_trends_stream(
@@ -48,7 +58,7 @@ async def google_trends_stream(
 
     # Note: retries/backoff_factor parameters may cause issues with newer urllib3
     # Using minimal config for compatibility
-    pytrends = TrendReq(hl='en-US', tz=360)
+    pytrends = _load_pytrends()(hl='en-US', tz=360)
 
     while True:
         try:
@@ -143,7 +153,7 @@ async def google_trends_single(
 
     # Note: retries/backoff_factor parameters may cause issues with newer urllib3
     # Using minimal config for compatibility
-    pytrends = TrendReq(hl='en-US', tz=360)
+    pytrends = _load_pytrends()(hl='en-US', tz=360)
     pytrends.build_payload(keywords, timeframe=timeframe)
 
     interest_df = pytrends.interest_over_time()

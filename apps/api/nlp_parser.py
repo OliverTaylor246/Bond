@@ -5,9 +5,6 @@ from __future__ import annotations
 import json
 from typing import Any, Dict
 
-from langchain_core.output_parsers import JsonOutputParser
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_openai import ChatOpenAI
 
 AVAILABLE_OPTIONS = {
     "symbols": "any cryptocurrency symbol (e.g., BTC, ETH, SOL, AVAX, MATIC, LINK, UNI, DOGE, ADA, DOT, AAVE, CRV, SUSHI, COMP, MKR, YFI, SNX, etc.)",
@@ -24,10 +21,7 @@ AVAILABLE_OPTIONS = {
     }
 }
 
-_PROMPT = ChatPromptTemplate.from_messages([
-    (
-        "system",
-        """You are a financial data stream configuration assistant.
+_SYSTEM_PROMPT = """You are a financial data stream configuration assistant.
 
 You have TWO response modes - choose the appropriate one:
 
@@ -64,13 +58,12 @@ Current context: {current_context}
 CRITICAL: For greetings like "hello", "hi", "hey" - use mode: "conversation".
 For data requests - use mode: "stream_spec".
 Return ONLY valid JSON, nothing else.
-""",
-    ),
-    (
-        "human",
-        "{user_request}",
-    ),
-])
+"""
+
+_PROMPT_MESSAGES = [
+    ("system", _SYSTEM_PROMPT),
+    ("human", "{user_request}"),
+]
 
 _RULES = """**For stream_spec mode:**
 1. Use any cryptocurrency ticker the user mentions (convert names to uppercase symbols).
@@ -130,6 +123,10 @@ async def parse_stream_request(
 
     print("[nlp_parser] Prompt submitted:", user_input, flush=True)
 
+    from langchain_core.output_parsers import JsonOutputParser
+    from langchain_core.prompts import ChatPromptTemplate
+    from langchain_openai import ChatOpenAI
+
     llm = ChatOpenAI(
         model="deepseek-chat",
         temperature=0.3,
@@ -139,14 +136,12 @@ async def parse_stream_request(
         timeout=30,
     )
 
-    prompt = _PROMPT.partial(
+    prompt = ChatPromptTemplate.from_messages(_PROMPT_MESSAGES).partial(
         available_options=_AVAILABLE_OPTIONS_TEXT,
         rules=_RULES,
         current_context=_format_current_spec(current_spec),
     )
 
-    # Use JsonOutputParser to parse the JSON response
-    from langchain_core.output_parsers import JsonOutputParser
     parser = JsonOutputParser()
     chain = prompt | llm | parser
 

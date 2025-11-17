@@ -1,45 +1,8 @@
 # Bond requirements
 # Python 3.11+
 
-# Core framework
-fastapi==0.109.0
-uvicorn[standard]==0.27.0
-pydantic==2.5.3
+# Base dependencies
+-r requirements/core.txt
 
-# Data sources
-ccxt==4.2.25
-ccxt[pro]==4.2.25
-aiohttp==3.8.6
-websockets==12.0
-
-# Redis
-redis[hiredis]==5.0.1
-
-# Auth
-supabase==2.6.0
-
-# HTML parsing / headless browser
-beautifulsoup4==4.12.3
-lxml==4.9.4
-playwright==1.47.0
-
-# Google Trends
-pytrends==4.9.2
-
-# gRPC for on-chain data (Yellowstone Geyser)
-grpcio==1.60.0
-grpcio-tools==1.60.0
-protobuf==4.25.1
-
-# JSON serialization
-orjson==3.9.15
-
-# Development
-pytest==7.4.4
-pytest-asyncio==0.23.3
-mypy==1.8.0
-flake8==7.0.0
-
-# NLP orchestration
-langchain==0.2.12
-langchain-openai==0.1.17
+# Optional LLM / browser dependencies (install separately if you need them)
+-r requirements/llm.txt

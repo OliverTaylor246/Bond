@@ -11,6 +11,15 @@ Bond lets you spin up custom real-time market data streams on demand. Describe w
 
 > **Note**: This repository contains the Ekko SDK, examples, and local development tools. Production-grade connectors, hosted runtime with SLAs, and enterprise features are available through [3KK0 Cloud](#3KK0-cloud-hosted-service) (contact for access).
 
+## 3kk0 Unified WebSocket Vision
+
+- **One WS for all exchanges** – the new `wss://api.3kk0.com/stream` model subscribes by symbol/channel/exchange and keeps per-connection filters inside the broker instead of spinning up per-stream pipelines.
+- **Stable schemas** – `engine/schemas.py` now exposes the 3kk0 trade and orderbook dataclasses with additive HFT fields, alongside the legacy Bond models for backward compatibility.
+- **Aggregation engine** – `engine/aggregation.py` dedupes, sorts, and merges trades/orderbooks across venues, including wildcard subscriptions like `exchanges: ["*"]`.
+- **Connector base** – `engine/connectors/base.py` defines the async lifecycle (connect, subscribe, __aiter__, shutdown) that every exchange-specific connector needs.
+- **Next up** – a single broker that fans normalized events through that schema, a metrics endpoint, and the new `kk0` Python SDK (replacing Ekko) will layer on top of these primitives before launch.
+ - **Architecture reference** – see `docs/3kk0_unified_stream_design.md` for the subscription schema, metrics contract, and plan for keeping the NL control plane alongside the new feed.
+
 ## Features
 
 - **Natural language interface** - Describe streams in plain English
@@ -20,6 +29,28 @@ Bond lets you spin up custom real-time market data streams on demand. Describe w
 - **Simple Python SDK** - One-line stream creation and consumption
 - **Redis Streams backend** - Fast, reliable event buffering
 - **Docker-based deployment** - Easy local development
+
+## Installation
+
+Bond expects Python 3.11 or 3.12 because pre-built `pydantic-core` wheels are not published for 3.14 yet; building from source currently fails with the `ForwardRef._evaluate` error you saw. Use one of the supported interpreters, then run:
+
+```bash
+cd /Users/olivertaylor/Projects/Code/Echo_Trading/3kk0
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements/core.txt
+```
+
+`requirements/core.txt` now pins `aiohttp>=3.8.10,<4`, which includes wheels for Python 3.11/3.12 on macOS 11+/arm64 so you no longer have to build `_websocket.c`. If you previously hit `aiohttp==3.8.6` build errors, recreate the venv now that the pin has been upgraded.
+
+`requirements/core.txt` now contains all runtime and test dependencies that the repo directly requires. Optional browser/LLM tooling (Langchain, Playwright, Supabase, etc.) lives in `requirements/llm.txt` and can be added when you need that stack:
+
+```bash
+python -m pip install -r requirements/llm.txt
+```
+
+`make install`/`make test` expect you to run inside this virtual environment.
 
 ## Quick Start
 

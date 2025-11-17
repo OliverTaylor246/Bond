@@ -8,7 +8,7 @@ import copy
 import json
 import re
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable, Iterable
+from typing import Any, Awaitable, Callable, Iterable, TYPE_CHECKING
 
 from apps.api.jupiter import (
   pick_best_token as pick_best_jupiter_token,
@@ -20,9 +20,6 @@ from apps.api.polymarket import (
 )
 from apps.api.spec_builder import build_spec_from_parsed_config, normalize_symbol
 from apps.api.nlp_parser import parse_stream_request
-from langchain_core.output_parsers import JsonOutputParser
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_openai import ChatOpenAI
 
 SOLANA_MINT_REGEX = re.compile(r"\b[1-9A-HJ-NP-Za-km-z]{32,44}\b")
 
@@ -34,7 +31,7 @@ DEFAULT_CLARIFICATION_MESSAGE = (
   "Can you clarify which assets or data sources you want to monitor so I can set up the right stream?"
 )
 
-INTENT_PROMPT = ChatPromptTemplate.from_messages([
+_INTENT_PROMPT_MESSAGES = [
   (
     "system",
     """You are the intent-classification agent for the 3KK0 market data assistant.\n"
@@ -62,7 +59,45 @@ INTENT_PROMPT = ChatPromptTemplate.from_messages([
     "Current stream context (if any):\n{current_context}\n\n"
     "User message: {user_text}",
   ),
-])
+]
+
+if TYPE_CHECKING:
+  from langchain_core.prompts import ChatPromptTemplate
+
+_INTENT_PROMPT_TEMPLATE: "ChatPromptTemplate" | None = None
+
+
+def _get_intent_prompt_template() -> ChatPromptTemplate:
+  global _INTENT_PROMPT_TEMPLATE
+  if _INTENT_PROMPT_TEMPLATE is None:
+    try:
+      from langchain_core.prompts import ChatPromptTemplate
+    except ImportError as exc:  # pragma: no cover - optional infra dependency
+      raise RuntimeError(
+        "langchain-core is required for intent classification; install it with `pip install langchain-core`"
+      ) from exc
+    _INTENT_PROMPT_TEMPLATE = ChatPromptTemplate.from_messages(_INTENT_PROMPT_MESSAGES)
+  return _INTENT_PROMPT_TEMPLATE
+
+
+def _load_json_output_parser():
+  try:
+    from langchain_core.output_parsers import JsonOutputParser
+  except ImportError as exc:  # pragma: no cover - optional infra dependency
+    raise RuntimeError(
+      "langchain-core is required for the stream planner; install it with `pip install langchain-core`"
+    ) from exc
+  return JsonOutputParser
+
+
+def _load_chat_openai():
+  try:
+    from langchain_openai import ChatOpenAI
+  except ImportError as exc:  # pragma: no cover - optional infra dependency
+    raise RuntimeError(
+      "langchain-openai is required for the stream planner; install it with `pip install langchain-openai`"
+    ) from exc
+  return ChatOpenAI
 
 
 @dataclass
@@ -130,7 +165,9 @@ class IntentAgent(BaseAgent):
         },
       )
 
+    JsonOutputParser = _load_json_output_parser()
     parser = JsonOutputParser()
+    ChatOpenAI = _load_chat_openai()
     llm = ChatOpenAI(
       model="deepseek-chat",
       temperature=0.0,
@@ -139,7 +176,7 @@ class IntentAgent(BaseAgent):
       base_url="https://api.deepseek.com/v1",
       timeout=20,
     )
-    chain = INTENT_PROMPT.partial(current_context=_format_context(ctx.current_spec)) | llm | parser
+    chain = _get_intent_prompt_template().partial(current_context=_format_context(ctx.current_spec)) | llm | parser
 
     try:
       result = await chain.ainvoke({"user_text": user_text})

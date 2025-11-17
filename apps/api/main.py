@@ -33,7 +33,6 @@ from apps.api.jupiter import (
   pick_best_token as pick_best_jupiter_token,
   search_tokens as search_jupiter_tokens,
 )
-from supabase import create_client, Client
 
 
 # Global runtime instance
@@ -42,7 +41,21 @@ runtime: StreamRuntime | None = None
 # Supabase client
 SUPABASE_URL = "https://eezdrsmjpycrzuriyzni.supabase.co"
 SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVlemRyc21qcHljcnp1cml5em5pIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI1MDQ1NTgsImV4cCI6MjA3ODA4MDU1OH0.kBl6L1pnX1OnNbTYURcNfijIK8Oqq4xfjXECwLLm_4o"
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+_supabase_client: Any | None = None
+
+def _get_supabase_client():
+  global _supabase_client
+  if _supabase_client is None:
+    try:
+      from supabase import Client, create_client
+    except ImportError as exc:  # pragma: no cover - optional infra dependency
+      raise RuntimeError(
+        "Supabase is required for the API endpoints that interact with the dashboard; install it with `pip install supabase`"
+      ) from exc
+    _supabase_client = create_client(SUPABASE_URL, SUPABASE_KEY)
+  return _supabase_client
+
 
 # Tier limits
 TIER_LIMITS = {
@@ -81,8 +94,9 @@ async def get_user_id_from_token(authorization: str | None = None) -> str | None
     return None
 
   token = authorization.replace("Bearer ", "")
+  client = _get_supabase_client()
   try:
-    user_response = supabase.auth.get_user(token)
+    user_response = client.auth.get_user(token)
     if user_response and user_response.user:
       return user_response.user.id
   except Exception as e:
@@ -95,9 +109,10 @@ async def get_user_id_from_token(authorization: str | None = None) -> str | None
 # Helper function to record stream creation in database
 async def record_stream_creation(user_id: str, stream_id: str, user_query: str):
   """Record stream in history and update user stats."""
+  client = _get_supabase_client()
   try:
     # Insert into stream_history
-    supabase.table("stream_history").insert({
+    client.table("stream_history").insert({
       "user_id": user_id,
       "stream_id": stream_id,
       "user_query": user_query,
@@ -105,7 +120,7 @@ async def record_stream_creation(user_id: str, stream_id: str, user_query: str):
     }).execute()
 
     # Update user_profiles counters
-    supabase.rpc("increment_stream_counts", {"p_user_id": user_id}).execute()
+    client.rpc("increment_stream_counts", {"p_user_id": user_id}).execute()
 
   except Exception as e:
     print(f"Error recording stream creation: {e}")
@@ -116,8 +131,9 @@ async def record_stream_creation(user_id: str, stream_id: str, user_query: str):
 async def mark_stream_stopped(stream_id: str):
   """Mark a stream as inactive in the database."""
   try:
+    client = _get_supabase_client()
     from datetime import datetime
-    supabase.table("stream_history").update({
+    client.table("stream_history").update({
       "is_active": False,
       "stopped_at": datetime.utcnow().isoformat()
     }).eq("stream_id", stream_id).eq("is_active", True).execute()
@@ -129,14 +145,15 @@ async def mark_stream_stopped(stream_id: str):
 async def get_user_stats(user_id: str) -> dict:
   """Get user tier, limits, and usage stats."""
   try:
-    result = supabase.rpc("get_user_stats", {"p_user_id": user_id}).execute()
+    client = _get_supabase_client()
+    result = client.rpc("get_user_stats", {"p_user_id": user_id}).execute()
     if result.data and len(result.data) > 0:
       stats = result.data[0]
       tier = stats.get("tier", "free")
 
       # Get accurate active streams count from runtime
       if runtime:
-        user_streams = supabase.table("stream_history").select("stream_id").eq("user_id", user_id).eq("is_active", True).execute()
+        user_streams = client.table("stream_history").select("stream_id").eq("user_id", user_id).eq("is_active", True).execute()
         active_stream_ids = [s["stream_id"] for s in (user_streams.data or [])]
         # Count how many are actually running
         actual_active = sum(1 for sid in active_stream_ids if runtime.is_running(sid))
@@ -384,7 +401,8 @@ async def user_history(
     raise HTTPException(401, "Authentication required")
 
   try:
-    result = supabase.table("stream_history")\
+    client = _get_supabase_client()
+    result = client.table("stream_history")\
       .select("*")\
       .eq("user_id", user_id)\
       .order("created_at", desc=True)\

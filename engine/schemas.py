@@ -1,12 +1,185 @@
-"""
-Event schemas for bond streaming platform.
-DO NOT MODIFY without strong justification - this defines the standard event model.
+from __future__ import annotations
 
-Version: v0.2 (Indie Quant + On-Chain gRPC)
-"""
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
-from typing import Any, Literal, Optional
+from enum import Enum
+from typing import Any, Dict, List, Literal, Optional, Sequence, Tuple
+
 from pydantic import BaseModel, Field
+
+# ---------------------------------------------------------------------
+# Common types
+# ---------------------------------------------------------------------
+
+Millis = int  # UTC epoch in milliseconds
+Price = float
+Size = float
+PriceSize = Tuple[Price, Size]
+
+
+class EventType(str, Enum):
+    TRADE = "trade"
+    ORDERBOOK = "orderbook"
+    HEARTBEAT = "heartbeat"
+    RAW = "raw"
+    SYSTEM = "system"
+
+
+class Side(str, Enum):
+    BUY = "buy"
+    SELL = "sell"
+    UNKNOWN = "unknown"
+
+
+class BookUpdateType(str, Enum):
+    SNAPSHOT = "snapshot"
+    DELTA = "delta"
+
+
+# ---------------------------------------------------------------------
+# Base event and helpers
+# ---------------------------------------------------------------------
+
+
+@dataclass(slots=True)
+class BaseEvent:
+    """
+    Base normalized event.
+
+    This is the *logical* schema; the on-the-wire JSON should match field names
+    exactly for backward compatibility.
+    """
+
+    type: EventType
+    exchange: str
+    symbol: str
+    ts_event: Millis
+    ts_exchange: Optional[Millis] = None
+    raw: Optional[Dict[str, Any]] = None
+
+    def to_wire(self) -> Dict[str, Any]:
+        d = asdict(self)
+        d["type"] = self.type.value
+        for key, value in list(d.items()):
+            if isinstance(value, Enum):
+                d[key] = value.value
+        return d
+
+
+# ---------------------------------------------------------------------
+# Trade schema
+# ---------------------------------------------------------------------
+
+
+@dataclass(slots=True, kw_only=True)
+class Trade(BaseEvent):
+    type: EventType = field(init=False, default=EventType.TRADE)
+    price: Price
+    size: Size
+    side: Side
+    trade_id: Optional[str] = None
+    match_id: Optional[str] = None
+    agg_trade_id: Optional[str] = None
+    maker: Optional[bool] = None
+    liquidity: Optional[str] = None
+    order_id: Optional[str] = None
+    client_order_id: Optional[str] = None
+    is_liquidation: Optional[bool] = None
+    is_block: Optional[bool] = None
+    is_odd_lot: Optional[bool] = None
+    fee: Optional[float] = None
+    fee_currency: Optional[str] = None
+    sequence: Optional[int] = None
+
+
+# ---------------------------------------------------------------------
+# Orderbook schema
+# ---------------------------------------------------------------------
+
+
+@dataclass(slots=True, kw_only=True)
+class OrderBook(BaseEvent):
+    type: EventType = field(init=False, default=EventType.ORDERBOOK)
+    bids: List[PriceSize]
+    asks: List[PriceSize]
+    update_type: BookUpdateType = BookUpdateType.SNAPSHOT
+    depth: Optional[int] = None
+    sequence: Optional[int] = None
+    prev_sequence: Optional[int] = None
+    checksum: Optional[int] = None
+    is_reset: bool = False
+    book_id: Optional[str] = None
+
+    @property
+    def best_bid(self) -> Optional[PriceSize]:
+        return self.bids[0] if self.bids else None
+
+    @property
+    def best_ask(self) -> Optional[PriceSize]:
+        return self.asks[0] if self.asks else None
+
+    @property
+    def mid_price(self) -> Optional[Price]:
+        if not self.bids or not self.asks:
+            return None
+        return (self.bids[0][0] + self.asks[0][0]) / 2.0
+
+    @property
+    def spread(self) -> Optional[Price]:
+        if not self.bids or not self.asks:
+            return None
+        return self.asks[0][0] - self.bids[0][0]
+
+
+# ---------------------------------------------------------------------
+# Heartbeats & raw messages
+# ---------------------------------------------------------------------
+
+
+@dataclass(slots=True, kw_only=True)
+class Heartbeat(BaseEvent):
+    type: EventType = field(init=False, default=EventType.HEARTBEAT)
+    info: Optional[Dict[str, Any]] = None
+
+
+@dataclass(slots=True, kw_only=True)
+class RawMessage(BaseEvent):
+    type: EventType = field(init=False, default=EventType.RAW)
+    payload: Dict[str, Any] = field(default_factory=dict)
+
+
+# ---------------------------------------------------------------------
+# Normalization utilities
+# ---------------------------------------------------------------------
+
+
+def normalize_symbol(exchange: str, raw_symbol: str) -> str:
+    s = raw_symbol.replace("-", "").replace("_", "").replace("/", "").upper()
+    common_quotes = ("USDT", "USDC", "BTC", "ETH", "USD", "EUR")
+    for q in common_quotes:
+        if s.endswith(q):
+            base = s[: -len(q)]
+            quote = q
+            return f"{base}/{quote}"
+    return raw_symbol
+
+
+def unify_side(raw_side: Any) -> Side:
+    if raw_side is None:
+        return Side.UNKNOWN
+    if isinstance(raw_side, bool):
+        return Side.BUY if raw_side else Side.SELL
+    s = str(raw_side).strip().lower()
+    if s in ("b", "buy", "bid", "long"):
+        return Side.BUY
+    if s in ("s", "sell", "ask", "short", "offer", "ofr"):
+        return Side.SELL
+    return Side.UNKNOWN
+
+
+# ---------------------------------------------------------------------
+# Legacy models (Bond/Ekko compatibility)
+# ---------------------------------------------------------------------
 
 
 class TradeEvent(BaseModel):
@@ -103,8 +276,6 @@ class AggregatedEvent(BaseModel):
   ts: datetime
   window_start: Optional[datetime] = None
   window_end: Optional[datetime] = None
-
-  # Price fields
   price_avg: Optional[float] = None
   price_high: Optional[float] = None
   price_low: Optional[float] = None
@@ -112,30 +283,17 @@ class AggregatedEvent(BaseModel):
   price_close: Optional[float] = None
   bid_avg: Optional[float] = None
   ask_avg: Optional[float] = None
-
-  # Volume
   volume_sum: Optional[float] = None
-
-  # Identity metadata
   symbol: Optional[str] = None
   exchange: Optional[str] = None
-
-  # Social & on-chain
   tweets: int = 0
   onchain_count: int = 0
   onchain_value_sum: Optional[float] = None
   custom_count: int = 0
-
   raw_data: dict[str, Any] = Field(default_factory=dict)
 
 
 class ResampleTransform(BaseModel):
-  """
-  Resample events over time windows with aggregations.
-
-  Example:
-    {"op": "resample", "window": "5s", "on": "price", "agg": ["mean", "last"]}
-  """
   op: Literal["resample"] = "resample"
   window: str = Field(description="Time window (e.g., '5s', '1m')")
   on: Optional[str] = Field(None, description="Field to aggregate")
@@ -145,39 +303,17 @@ class ResampleTransform(BaseModel):
 
 
 class CountTransform(BaseModel):
-  """
-  Count events over a time window.
-
-  Example:
-    {"op": "count", "window": "10s", "as": "event_count"}
-  """
   op: Literal["count"] = "count"
   window: str = Field(description="Time window (e.g., '10s')")
   as_field: str = Field("count", alias="as", description="Output field name")
 
 
 class ProjectTransform(BaseModel):
-  """
-  Project (select) specific fields from events.
-
-  Example:
-    {"op": "project", "fields": ["price", "volume", "ts"]}
-  """
   op: Literal["project"] = "project"
   fields: list[str] = Field(description="List of fields to keep")
 
 
 class StreamSpec(BaseModel):
-  """
-  Stream specification - defines what data sources and aggregation to use.
-
-  EARLY PHASE - avoid schema changes without backward compatibility plan.
-
-  v0.2 additions:
-    - transforms: List of transform operations (resample, count, project)
-    - version: Schema version for backward compatibility
-    - name/description: Optional metadata
-  """
   version: Literal["v1"] = "v1"
   name: Optional[str] = None
   description: Optional[str] = None
