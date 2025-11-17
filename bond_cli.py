@@ -32,6 +32,7 @@ class BondCLI:
     self.conversation_history: list[str] = []
     self.active_streams: dict[str, dict[str, Any]] = {}
     self.current_stream_task: Optional[asyncio.Task] = None
+    self.created_streams: set[str] = set()  # Track streams created in this session
 
   async def run(self) -> None:
     """Main CLI loop."""
@@ -255,6 +256,9 @@ Welcome to Bond - your conversational data streaming assistant!
       "created_at": datetime.now()
     }
 
+    # Track that we created this stream
+    self.created_streams.add(stream_id)
+
     # Offer to watch
     if Confirm.ask("Watch this stream now?", default=True):
       await self.watch_stream(stream_id, ws_url)
@@ -262,27 +266,46 @@ Welcome to Bond - your conversational data streaming assistant!
   async def watch_stream(self, stream_id: str, ws_url: str) -> None:
     """Watch a stream in real-time."""
     console.print(f"\n[cyan]Connecting to stream {stream_id}...[/]")
-    console.print("[dim]Press Ctrl+C to stop watching[/]\n")
+    console.print("[bold yellow]Press Ctrl+C to stop watching and return to chat[/]\n")
 
     try:
-      async with websockets.connect(ws_url) as ws:
+      async with websockets.connect(ws_url, ping_interval=20, ping_timeout=10) as ws:
         event_count = 0
+        console.print("[dim]Waiting for events... (stream may take a few seconds to start producing data)[/]")
 
-        with Live(console=console, refresh_per_second=1, screen=False) as live:
+        # Use Live display with proper updating
+        initial_table = Table(title="Waiting for first event...")
+
+        with Live(initial_table, console=console, refresh_per_second=1) as live:
           async for message in ws:
-            event = json.loads(message)
-            event_count += 1
+            try:
+              event = json.loads(message)
+              event_count += 1
 
-            # Build display table
-            table = self.build_event_table(event, event_count)
-            live.update(table)
+              # Build display table
+              table = self.build_event_table(event, event_count)
+
+              # Wrap in panel with header and footer
+              display = Panel(
+                table,
+                title=f"[bold yellow]📊 Stream {stream_id}[/]",
+                subtitle="[dim]Press Ctrl+C to stop watching[/]",
+                border_style="yellow"
+              )
+
+              live.update(display)
+            except json.JSONDecodeError as e:
+              console.print(f"[yellow]Warning: Invalid JSON received: {message[:100]}[/]")
+              continue
 
     except KeyboardInterrupt:
-      console.print("\n[yellow]Stopped watching stream[/]")
+      console.print("\n[green]✓ Stopped watching. You can continue chatting or type /list to see active streams.[/]")
     except websockets.exceptions.ConnectionClosed:
       console.print("\n[red]Stream connection closed[/]")
+    except asyncio.TimeoutError:
+      console.print("\n[red]Connection timed out. The stream may not be producing data yet.[/]")
     except Exception as e:
-      console.print(f"\n[red]Error watching stream: {e}[/]")
+      console.print(f"\n[red]Error watching stream: {type(e).__name__}: {e}[/]")
 
   def build_event_table(self, event: dict[str, Any], event_count: int) -> Table:
     """Build rich table for event display."""
@@ -530,9 +553,21 @@ Just ask me what you want:
     console.print(f"\n[bold blue]Bond:[/] {message}\n")
 
   async def cleanup(self) -> None:
-    """Cleanup before exit."""
+    """Cleanup before exit - delete all streams created in this session."""
     if self.current_stream_task and not self.current_stream_task.done():
       self.current_stream_task.cancel()
+
+    # Delete all streams created in this session
+    if self.created_streams:
+      console.print(f"\n[yellow]Cleaning up {len(self.created_streams)} stream(s)...[/]")
+
+      async with httpx.AsyncClient(timeout=10.0) as client:
+        for stream_id in self.created_streams:
+          try:
+            await client.delete(f"{self.api_url}/v1/streams/{stream_id}")
+            console.print(f"[dim]Deleted stream {stream_id}[/]")
+          except Exception as e:
+            console.print(f"[dim red]Failed to delete {stream_id}: {e}[/]")
 
 
 async def main():
