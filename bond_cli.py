@@ -20,6 +20,8 @@ from rich.prompt import Prompt, Confirm
 from rich.layout import Layout
 from rich.text import Text
 
+from bond_auth import BondAuth
+
 console = Console()
 
 
@@ -33,9 +35,30 @@ class BondCLI:
     self.active_streams: dict[str, dict[str, Any]] = {}
     self.current_stream_task: Optional[asyncio.Task] = None
     self.created_streams: set[str] = set()  # Track streams created in this session
+    self.auth = BondAuth(api_url)  # Authentication manager
+
+  def get_headers(self) -> dict[str, str]:
+    """Get HTTP headers with authentication."""
+    headers = {"Content-Type": "application/json"}
+    headers.update(self.auth.get_auth_headers())
+    return headers
 
   async def run(self) -> None:
     """Main CLI loop."""
+    # Check if authenticated
+    if not self.auth.is_authenticated():
+      console.print("[yellow]You need to log in to use Bond CLI[/]\n")
+      if not await self.auth.login():
+        console.print("[red]Login failed. Exiting...[/]")
+        return
+
+    # Verify session is still valid
+    if not await self.auth.check_session():
+      console.print("[yellow]Your session has expired. Please log in again.[/]\n")
+      if not await self.auth.login():
+        console.print("[red]Login failed. Exiting...[/]")
+        return
+
     self.print_welcome()
 
     while True:
@@ -72,10 +95,13 @@ class BondCLI:
 
   def print_welcome(self) -> None:
     """Print welcome message."""
-    welcome = """
+    user_info = f"Logged in as: {self.auth.user_email}" if self.auth.user_email else "Not logged in"
+
+    welcome = f"""
 # 🚀 Bond Terminal
 
 Welcome to Bond - your conversational data streaming assistant!
+**{user_info}**
 
 **What I can do:**
 - Stream crypto prices from exchanges (Binance, Kraken, etc.)
@@ -116,6 +142,7 @@ Welcome to Bond - your conversational data streaming assistant!
         # Call Bond's stream planner
         response = await client.post(
           f"{self.api_url}/v1/streams/parse",
+          headers=self.get_headers(),
           json={
             "query": query,
             "context": self.conversation_history[-5:]  # Last 5 messages
@@ -179,6 +206,7 @@ Welcome to Bond - your conversational data streaming assistant!
       async with httpx.AsyncClient(timeout=30.0) as client:
         response = await client.post(
           f"{self.api_url}/v1/streams",
+          headers=self.get_headers(),
           json={"natural_language": query}
         )
 
@@ -204,6 +232,7 @@ Welcome to Bond - your conversational data streaming assistant!
       async with httpx.AsyncClient(timeout=30.0) as client:
         response = await client.post(
           f"{self.api_url}/v1/streams",
+          headers=self.get_headers(),
           json={"spec": spec}
         )
 
@@ -401,6 +430,16 @@ Welcome to Bond - your conversational data streaming assistant!
       console.clear()
     elif command == "/history":
       self.show_history()
+    elif command == "/login":
+      await self.auth.login()
+    elif command == "/logout":
+      await self.auth.logout()
+      console.print("[yellow]You've been logged out. Type /login to log in again or 'exit' to quit.[/]")
+    elif command == "/whoami":
+      if self.auth.is_authenticated():
+        console.print(f"[cyan]Logged in as: {self.auth.user_email}[/]")
+      else:
+        console.print("[yellow]Not logged in[/]")
     else:
       console.print(f"[red]Unknown command: {command}[/]")
       console.print("[yellow]Type /help for available commands[/]")
@@ -417,6 +456,9 @@ Welcome to Bond - your conversational data streaming assistant!
 - `/url <id>` - Get WebSocket URL for a stream
 - `/clear` - Clear the screen
 - `/history` - Show conversation history
+- `/login` - Log in with your Bond account
+- `/logout` - Log out from your account
+- `/whoami` - Show current logged in user
 - `exit` or `quit` - Exit the CLI
 
 # Natural Language
@@ -433,7 +475,7 @@ Just ask me what you want:
     """List all active streams."""
     try:
       async with httpx.AsyncClient(timeout=10.0) as client:
-        response = await client.get(f"{self.api_url}/v1/streams")
+        response = await client.get(f"{self.api_url}/v1/streams", headers=self.get_headers())
 
         if response.status_code != 200:
           console.print(f"[red]Failed to list streams: {response.status_code}[/]")
@@ -469,7 +511,7 @@ Just ask me what you want:
     """Stop a stream."""
     try:
       async with httpx.AsyncClient(timeout=10.0) as client:
-        response = await client.delete(f"{self.api_url}/v1/streams/{stream_id}")
+        response = await client.delete(f"{self.api_url}/v1/streams/{stream_id}", headers=self.get_headers())
 
         if response.status_code == 404:
           console.print(f"[red]Stream {stream_id} not found[/]")
@@ -492,7 +534,7 @@ Just ask me what you want:
     try:
       # Get stream info first
       async with httpx.AsyncClient(timeout=10.0) as client:
-        response = await client.get(f"{self.api_url}/v1/streams/{stream_id}")
+        response = await client.get(f"{self.api_url}/v1/streams/{stream_id}", headers=self.get_headers())
 
         if response.status_code == 404:
           console.print(f"[red]Stream {stream_id} not found[/]")
@@ -518,7 +560,7 @@ Just ask me what you want:
     """Show WebSocket URL for a stream."""
     try:
       async with httpx.AsyncClient(timeout=10.0) as client:
-        response = await client.get(f"{self.api_url}/v1/streams/{stream_id}")
+        response = await client.get(f"{self.api_url}/v1/streams/{stream_id}", headers=self.get_headers())
 
         if response.status_code == 404:
           console.print(f"[red]Stream {stream_id} not found[/]")
@@ -564,7 +606,7 @@ Just ask me what you want:
       async with httpx.AsyncClient(timeout=10.0) as client:
         for stream_id in self.created_streams:
           try:
-            await client.delete(f"{self.api_url}/v1/streams/{stream_id}")
+            await client.delete(f"{self.api_url}/v1/streams/{stream_id}", headers=self.get_headers())
             console.print(f"[dim]Deleted stream {stream_id}[/]")
           except Exception as e:
             console.print(f"[dim red]Failed to delete {stream_id}: {e}[/]")

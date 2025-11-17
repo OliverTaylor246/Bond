@@ -339,6 +339,12 @@ async def login_page():
   return FileResponse("/app/apps/api/static/login.html")
 
 
+@app.get("/login/cli")
+async def login_cli_page():
+  """Serve the CLI login page that displays the access token."""
+  return FileResponse("/app/apps/api/static/login_cli.html")
+
+
 @app.get("/")
 async def root(request: Request):
   """Serve the UI - require authentication."""

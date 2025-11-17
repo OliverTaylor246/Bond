@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CLI Login - Bond</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      background: linear-gradient(135deg, #0a0e27 0%, #1a1f3a 100%);
+      color: #e6ecff;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .container {
+      background: rgba(14, 22, 39, 0.95);
+      border: 1px solid rgba(59, 130, 246, 0.25);
+      border-radius: 16px;
+      padding: 48px;
+      width: 100%;
+      max-width: 520px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+    }
+
+    h1 {
+      font-size: 28px;
+      margin-bottom: 8px;
+      text-align: center;
+    }
+
+    .subtitle {
+      text-align: center;
+      color: #8aa1c5;
+      margin-bottom: 32px;
+      font-size: 14px;
+    }
+
+    .form-group {
+      margin-bottom: 20px;
+    }
+
+    label {
+      display: block;
+      margin-bottom: 8px;
+      font-size: 14px;
+      color: #cbd5e1;
+    }
+
+    input {
+      width: 100%;
+      padding: 12px 16px;
+      background: rgba(8, 13, 23, 0.8);
+      border: 1px solid rgba(59, 130, 246, 0.25);
+      border-radius: 10px;
+      color: #e6ecff;
+      font-size: 14px;
+      transition: border-color 0.2s;
+    }
+
+    input:focus {
+      outline: none;
+      border-color: rgba(59, 130, 246, 0.55);
+    }
+
+    button {
+      width: 100%;
+      padding: 14px;
+      background: linear-gradient(135deg, rgba(59,130,246,0.9), rgba(37,99,235,0.85));
+      border: 1px solid rgba(59,130,246,0.55);
+      border-radius: 10px;
+      color: #fff;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform 0.15s;
+      box-shadow: 0 10px 24px rgba(59,130,246,0.25);
+      margin-top: 8px;
+    }
+
+    button:hover {
+      transform: translateY(-2px);
+    }
+
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    .token-display {
+      display: none;
+      margin-top: 24px;
+    }
+
+    .token-display.show {
+      display: block;
+    }
+
+    .success-icon {
+      text-align: center;
+      font-size: 48px;
+      margin-bottom: 16px;
+    }
+
+    .token-box {
+      background: rgba(8, 13, 23, 0.8);
+      border: 1px solid rgba(34, 197, 94, 0.3);
+      border-radius: 10px;
+      padding: 16px;
+      margin: 16px 0;
+      word-break: break-all;
+      font-family: 'Monaco', 'Courier New', monospace;
+      font-size: 13px;
+      color: #22c55e;
+      position: relative;
+    }
+
+    .copy-btn {
+      margin-top: 12px;
+      background: linear-gradient(135deg, rgba(34,197,94,0.9), rgba(21,128,61,0.85));
+      border: 1px solid rgba(34,197,94,0.55);
+      box-shadow: 0 10px 24px rgba(34,197,94,0.25);
+    }
+
+    .copy-btn:hover {
+      transform: translateY(-2px);
+    }
+
+    .instructions {
+      background: rgba(59, 130, 246, 0.1);
+      border: 1px solid rgba(59, 130, 246, 0.25);
+      border-radius: 10px;
+      padding: 16px;
+      margin-top: 20px;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+
+    .instructions h3 {
+      font-size: 16px;
+      margin-bottom: 12px;
+      color: #60a5fa;
+    }
+
+    .instructions ol {
+      margin-left: 20px;
+      color: #cbd5e1;
+    }
+
+    .instructions li {
+      margin-bottom: 8px;
+    }
+
+    .instructions code {
+      background: rgba(8, 13, 23, 0.6);
+      padding: 2px 8px;
+      border-radius: 4px;
+      color: #22c55e;
+      font-family: 'Monaco', 'Courier New', monospace;
+      font-size: 13px;
+    }
+
+    .login-form {
+      display: block;
+    }
+
+    .login-form.hide {
+      display: none;
+    }
+
+    .message {
+      margin-top: 16px;
+      padding: 12px;
+      border-radius: 8px;
+      font-size: 14px;
+      text-align: center;
+    }
+
+    .message.error {
+      background: rgba(239, 68, 68, 0.1);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      color: #fca5a5;
+    }
+
+    .message.success {
+      background: rgba(34, 197, 94, 0.1);
+      border: 1px solid rgba(34, 197, 94, 0.3);
+      color: #86efac;
+    }
+
+    .divider {
+      display: flex;
+      align-items: center;
+      margin: 24px 0;
+      color: #64748b;
+      font-size: 14px;
+    }
+
+    .divider::before,
+    .divider::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: rgba(100, 116, 139, 0.3);
+    }
+
+    .divider::before {
+      margin-right: 12px;
+    }
+
+    .divider::after {
+      margin-left: 12px;
+    }
+
+    .oauth-btn {
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      box-shadow: none;
+    }
+
+    .oauth-btn:hover {
+      background: rgba(255, 255, 255, 0.12);
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🔐 Bond CLI Login</h1>
+    <p class="subtitle">Sign in to get your access token for the CLI</p>
+
+    <div class="login-form" id="loginForm">
+      <div class="form-group">
+        <label for="email">Email</label>
+        <input type="email" id="email" placeholder="you@example.com" required>
+      </div>
+
+      <div class="form-group">
+        <label for="password">Password</label>
+        <input type="password" id="password" placeholder="••••••••" required>
+      </div>
+
+      <button id="loginBtn" onclick="handleLogin()">Sign In</button>
+      <button id="signupBtn" onclick="handleSignup()">Create Account</button>
+
+      <div class="divider">or continue with</div>
+
+      <button class="oauth-btn" onclick="handleGoogleLogin()">
+        <svg width="18" height="18" viewBox="0 0 18 18" style="display:inline-block;vertical-align:middle;margin-right:8px">
+          <path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.874 2.684-6.615z"/>
+          <path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.184l-2.908-2.258c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332C2.438 15.983 5.482 18 9 18z"/>
+          <path fill="#FBBC05" d="M3.964 10.707c-.18-.54-.282-1.117-.282-1.707 0-.593.102-1.17.282-1.709V4.958H.957C.347 6.173 0 7.548 0 9c0 1.452.348 2.827.957 4.042l3.007-2.335z"/>
+          <path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0 5.482 0 2.438 2.017.957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z"/>
+        </svg>
+        Google
+      </button>
+
+      <button class="oauth-btn" onclick="handleGithubLogin()" style="margin-top: 12px;">
+        <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor" style="display:inline-block;vertical-align:middle;margin-right:8px">
+          <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
+        </svg>
+        GitHub
+      </button>
+
+      <div id="message"></div>
+    </div>
+
+    <div class="token-display" id="tokenDisplay">
+      <div class="success-icon">✅</div>
+      <h2 style="text-align:center;margin-bottom:16px;">Login Successful!</h2>
+
+      <p style="color:#8aa1c5;text-align:center;margin-bottom:16px;">
+        Here's your access token:
+      </p>
+
+      <div class="token-box" id="tokenBox">
+        <div id="tokenText"></div>
+      </div>
+
+      <button class="copy-btn" onclick="copyToken()">
+        📋 Copy Token
+      </button>
+
+      <div class="instructions">
+        <h3>Next Steps:</h3>
+        <ol>
+          <li>Copy the access token above</li>
+          <li>Go back to your terminal</li>
+          <li>Paste the token when prompted</li>
+          <li>Start creating streams with: <code>btc every 5 seconds</code></li>
+        </ol>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const SUPABASE_URL = 'https://eezdrsmjpycrzuriyzni.supabase.co';
+    const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVlemRyc21qcHljcnp1cml5em5pIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI1MDQ1NTgsImV4cCI6MjA3ODA4MDU1OH0.kBl6L1pnX1OnNbTYURcNfijIK8Oqq4xfjXECwLLm_4o';
+    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+    let accessToken = null;
+
+    function showMessage(text, type) {
+      const messageDiv = document.getElementById('message');
+      messageDiv.textContent = text;
+      messageDiv.className = `message ${type}`;
+    }
+
+    function showToken(token) {
+      accessToken = token;
+      document.getElementById('loginForm').classList.add('hide');
+      document.getElementById('tokenDisplay').classList.add('show');
+      document.getElementById('tokenText').textContent = token;
+    }
+
+    async function handleLogin() {
+      const email = document.getElementById('email').value;
+      const password = document.getElementById('password').value;
+
+      if (!email || !password) {
+        showMessage('Please enter email and password', 'error');
+        return;
+      }
+
+      const btn = document.getElementById('loginBtn');
+      btn.disabled = true;
+      btn.textContent = 'Signing in...';
+
+      try {
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email,
+          password
+        });
+
+        if (error) throw error;
+
+        if (data.session) {
+          showToken(data.session.access_token);
+        } else {
+          showMessage('Login successful but no session returned', 'error');
+        }
+      } catch (error) {
+        showMessage(error.message || 'Login failed', 'error');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Sign In';
+      }
+    }
+
+    async function handleSignup() {
+      const email = document.getElementById('email').value;
+      const password = document.getElementById('password').value;
+
+      if (!email || !password) {
+        showMessage('Please enter email and password', 'error');
+        return;
+      }
+
+      const btn = document.getElementById('signupBtn');
+      btn.disabled = true;
+      btn.textContent = 'Creating account...';
+
+      try {
+        const { data, error } = await supabase.auth.signUp({
+          email,
+          password
+        });
+
+        if (error) throw error;
+
+        if (data.session) {
+          showToken(data.session.access_token);
+        } else {
+          showMessage('Account created! Check your email to verify, then sign in.', 'success');
+        }
+      } catch (error) {
+        showMessage(error.message || 'Signup failed', 'error');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Create Account';
+      }
+    }
+
+    async function handleGoogleLogin() {
+      try {
+        const { data, error } = await supabase.auth.signInWithOAuth({
+          provider: 'google',
+          options: {
+            redirectTo: window.location.href
+          }
+        });
+        if (error) throw error;
+      } catch (error) {
+        showMessage(error.message || 'Google login failed', 'error');
+      }
+    }
+
+    async function handleGithubLogin() {
+      try {
+        const { data, error } = await supabase.auth.signInWithOAuth({
+          provider: 'github',
+          options: {
+            redirectTo: window.location.href
+          }
+        });
+        if (error) throw error;
+      } catch (error) {
+        showMessage(error.message || 'GitHub login failed', 'error');
+      }
+    }
+
+    function copyToken() {
+      if (!accessToken) return;
+
+      navigator.clipboard.writeText(accessToken).then(() => {
+        const btn = event.target;
+        const originalText = btn.textContent;
+        btn.textContent = '✓ Copied!';
+        setTimeout(() => {
+          btn.textContent = originalText;
+        }, 2000);
+      }).catch(err => {
+        showMessage('Failed to copy token', 'error');
+      });
+    }
+
+    // Check if redirected from OAuth with token
+    window.addEventListener('DOMContentLoaded', async () => {
+      const urlParams = new URLSearchParams(window.location.hash.substring(1));
+      const token = urlParams.get('access_token');
+
+      if (token) {
+        showToken(token);
+      } else {
+        // Check for existing session
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session) {
+          showToken(session.access_token);
+        }
+      }
+    });
+
+    // Allow Enter key to submit
+    document.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter' && !document.getElementById('loginForm').classList.contains('hide')) {
+        handleLogin();
+      }
+    });
+  </script>
+</body>
+</html>
