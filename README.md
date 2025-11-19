@@ -98,6 +98,96 @@ async for event in listen("BTC price + tweets every 5s"):
   print(f"Price: {event['price_avg']}, Tweets: {event['tweets']}")
 ```
 
+## 3kk0 Unified Broker Quickstart
+
+The unified WebSocket broker now runs inside Railway at `https://3kk0-broker-production.up.railway.app`, so the public entry point is:
+
+```
+wss://3kk0-broker-production.up.railway.app/stream
+```
+
+It still lives in `apps/broker/unified.py` and is documented in [docs/3kk0_unified_stream_design.md](docs/3kk0_unified_stream_design.md). The Docker runtime can be rebuilt with `infra/Dockerfile.runtime`.
+
+1. **Build & push the runtime image**
+   ```bash
+   docker build -f infra/Dockerfile.runtime -t ekkostream/3kk0-broker:latest .
+   docker push ekkostream/3kk0-broker:latest
+   ```
+
+   The container now exposes port **6900** (in addition to the standard ports), so when you wire the Railway service be sure to forward `6900` for the WebSocket listener.  
+
+2. **Deploy on Railway**
+   - Create a service from the pushed image.
+   - Set environment variables (`REDIS_URL`, `WS_HOST`, `SERVICE_TARGET`, etc.).
+   - Expose `/stream` over TLS (Railway does this automatically).
+
+3. **Check metrics**
+   ```
+   curl https://3kk0-broker-production.up.railway.app/metrics
+   ```
+   Confirm `active_subscriptions`, `messages_per_second`, and `exchange_status` show healthy values.
+
+## kk0 SDK Quickstart
+
+The new SDK is packaged under `sdk/python/kk0` and published to PyPI as `kk0`. It targets the unified WebSocket and exposes a clean async API.
+
+```bash
+pip install kk0
+```
+
+```python
+from kk0 import Stream
+
+async def main():
+    async with Stream("wss://3kk0-broker-production.up.railway.app/stream") as s:
+        await s.subscribe(
+            channels=["trades"],
+            symbols=["SOL/USDT"],
+            exchanges=["binance"],
+        )
+        async for event in s:
+            print(event)
+
+asyncio.run(main())
+```
+
+To publish the SDK:
+1. `cd sdk/python`
+2. `python -m pip install --upgrade build twine`
+3. `python -m build`
+4. `twine upload dist/*`
+
+If you prefer staging: `twine upload --repository testpypi dist/*`.
+
+## kk0 SDK Quickstart
+
+The new Python client lives in `sdk/python/kk0` and is published as `kk0` on PyPI. To try it locally:
+
+```bash
+pip install -e sdk/python/kk0
+```
+
+```python
+from kk0 import Stream
+
+stream = Stream(
+    symbols=["BTC/USDT"],
+    exchanges=["binance", "okx"],
+    channels=["trades"],
+    ws_url="ws://localhost:8000/stream"
+)
+
+for msg in stream:
+    print(msg)
+```
+
+When you’re ready to publish the SDK:
+1. Install build tools (`python -m pip install --upgrade build twine`).
+2. From `sdk/python/kk0`, run `python -m build`.
+3. Upload packages with `twine upload dist/*`.
+
+The SDK connects directly to `wss://api.3kk0.com/stream`, auto-reconnects, emits heartbeats, and exposes optional `.on_error` / `.on_heartbeat` hooks.
+
 ## Architecture
 
 ```

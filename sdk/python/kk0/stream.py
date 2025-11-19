@@ -1,116 +1,95 @@
-from __future__ import annotations
-
 import asyncio
 import json
-import queue
-import threading
-import time
-from typing import Any, AsyncIterator, Callable, Iterable, Iterator, Optional
+import logging
+from typing import Iterable, Callable, Optional
 
 import websockets
+from websockets import WebSocketClientProtocol
 
-SubscribePayload = dict[str, Any]
+logger = logging.getLogger(__name__)
 
 
 class Stream:
     """
-    Simple 3kk0 client.
-
-    Supports both async iteration (`async for event in stream`) and
-    synchronous iteration (`for event in stream`).
+    Resilient kk0 client that keeps the websocket alive and exposes an iterator.
     """
 
     def __init__(
         self,
+        url: str,
         *,
-        symbols: Iterable[str] = ("BTC/USDT",),
-        exchanges: Iterable[str] = ("binance",),
-        channels: Iterable[str] = ("trades",),
-        depth: int = 20,
-        raw: bool = False,
-        ws_url: str = "wss://api.3kk0.com/stream",
-        on_error: Optional[Callable[[Exception], None]] = None,
-        on_heartbeat: Optional[Callable[[dict[str, Any]], None]] = None,
-    ) -> None:
-        self.symbols = list(symbols)
-        self.exchanges = list(exchanges)
-        self.channels = list(channels)
-        self.depth = depth
-        self.raw = raw
-        self.ws_url = ws_url
-        self._on_error = on_error
+        reconnect_interval: float = 0.5,
+        on_heartbeat: Optional[Callable[[dict], None]] = None,
+    ):
+        self.url = url
+        self.reconnect_interval = reconnect_interval
         self._on_heartbeat = on_heartbeat
+        self._ws: WebSocketClientProtocol | None = None
         self._stop = False
-        self._queue: "queue.Queue[Optional[dict[str, Any]]]" = queue.Queue()
-        self._thread: Optional[threading.Thread] = None
-        self._loop = asyncio.new_event_loop()
-        self._async_generator: Optional[AsyncIterator[dict[str, Any]]] = None
 
-    def _build_payload(self) -> SubscribePayload:
-        return {
-            "type": "subscribe",
-            "symbols": self.symbols,
-            "exchanges": self.exchanges,
-            "channels": self.channels,
-            "depth": self.depth,
-            "raw": self.raw,
-        }
-
-    def __aiter__(self) -> "Stream":
+    async def __aenter__(self):
+        self._ws = await self._connect()
         return self
 
-    async def __anext__(self) -> dict[str, Any]:
-        if self._async_generator is None:
-            self._async_generator = self._message_stream()
-        assert self._async_generator is not None
-        return await self._async_generator.__anext__()
+    async def __aexit__(self, exc_type, exc, tb):
+        await self.close()
 
-    async def _message_stream(self) -> AsyncIterator[dict[str, Any]]:
-        backoff = 1.0
+    async def _connect(self) -> WebSocketClientProtocol:
         while not self._stop:
             try:
-                async with websockets.connect(self.ws_url) as ws:
-                    await ws.send(json.dumps(self._build_payload()))
-                    while not self._stop:
-                        raw = await ws.recv()
-                        data = json.loads(raw)
-                        self._handle_event(data)
-                        yield data
+                ws = await websockets.connect(self.url, ping_interval=20, close_timeout=5)
+                return ws
             except Exception as exc:
-                self._handle_error(exc)
-                await asyncio.sleep(backoff)
-                backoff = min(backoff * 2, 10.0)
+                logger.debug("kk0 stream reconnecting after connect error: %s", exc)
+                await asyncio.sleep(self.reconnect_interval)
+        raise RuntimeError("Stream stopped before connection could be established")
 
-    def __iter__(self) -> Iterator[dict[str, Any]]:
-        if self._thread is None:
-            self._thread = threading.Thread(
-                target=self._run_sync_loop, daemon=True
-            )
-            self._thread.start()
-        while True:
-            item = self._queue.get()
-            if item is None:
-                break
-            yield item
+    async def subscribe(
+        self,
+        *,
+        channels: Iterable[str],
+        symbols: Iterable[str],
+        exchanges: Iterable[str],
+        depth: int = 20,
+    ):
+        if not self._ws:
+            raise RuntimeError("WebSocket isn't connected yet")
+        payload = {
+            "type": "subscribe",
+            "channels": list(channels),
+            "symbols": list(symbols),
+            "exchanges": list(exchanges),
+            "depth": depth,
+        }
+        await self._ws.send(json.dumps(payload))
 
-    def stop(self) -> None:
+    async def close(self) -> None:
         self._stop = True
+        if self._ws:
+            await self._ws.close()
+            self._ws = None
 
-    def _run_sync_loop(self) -> None:
-        asyncio.set_event_loop(self._loop)
-        try:
-            self._loop.run_until_complete(self._fill_sync_queue())
-        finally:
-            self._queue.put(None)
+    def __aiter__(self):
+        return self
 
-    async def _fill_sync_queue(self) -> None:
-        async for event in self._message_stream():
-            self._queue.put(event)
-
-    def _handle_event(self, event: dict[str, Any]) -> None:
-        if event.get("type") == "heartbeat" and self._on_heartbeat:
-            self._on_heartbeat(event)
-
-    def _handle_error(self, exc: Exception) -> None:
-        if self._on_error:
-            self._on_error(exc)
+    async def __anext__(self):
+        while True:
+            if not self._ws:
+                self._ws = await self._connect()
+            assert self._ws
+            try:
+                msg = await self._ws.recv()
+                event = json.loads(msg)
+                if event.get("type") == "heartbeat" and self._on_heartbeat:
+                    self._on_heartbeat(event)
+                return event
+            except websockets.ConnectionClosedOK:
+                logger.debug("kk0 stream closed cleanly, reconnecting")
+                self._ws = None
+                await asyncio.sleep(self.reconnect_interval)
+                continue
+            except websockets.ConnectionClosedError as exc:
+                logger.warning("kk0 stream closed unexpectedly: %s", exc)
+                self._ws = None
+                await asyncio.sleep(self.reconnect_interval)
+                continue

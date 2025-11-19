@@ -3,11 +3,15 @@ FROM python:3.11-slim
 WORKDIR /app
 
 COPY requirements.txt .
+COPY requirements requirements
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 COPY apps/runtime/reaper.py /app/apps/runtime/reaper.py
 
 ENV SERVICE_TARGET=runtime
+ENV PYTHONPATH=/app
+
+EXPOSE 6900
 
 CMD ["python", "apps/runtime/runtime_entry.py"]
