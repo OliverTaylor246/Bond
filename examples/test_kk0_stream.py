@@ -27,7 +27,7 @@ from kk0 import Stream  # noqa: E402
 STREAM_URL = "ws://46.62.131.60:8000/stream"
 SYMBOLS = ["BTC/USDT"]
 CHANNELS = ["trades"]
-EXCHANGES = ["binance"]
+EXCHANGES = ["hyperliquid"]
 
 
 async def bitcoin_stream():
