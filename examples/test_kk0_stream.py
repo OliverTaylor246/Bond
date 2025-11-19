@@ -24,21 +24,22 @@ else:
 
 from kk0 import Stream  # noqa: E402
 
-STREAM_URL = "wss://3kk0-broker-production.up.railway.app/stream"
+STREAM_URL = "ws://46.62.131.60:8000/stream"
 SYMBOLS = ["BTC/USDT"]
 CHANNELS = ["trades"]
-EXCHANGES = ["bybit"]
+EXCHANGES = ["binance"]
 
 
 async def bitcoin_stream():
     """Subscribe to BTC trades via the kk0 unified WebSocket."""
     async with Stream(STREAM_URL) as stream:
         await stream.subscribe(
-            channels=CHANNELS,
-            symbols=SYMBOLS,
-            exchanges=EXCHANGES,
-            depth=20,
-        )
+    channels=["trades"],
+    symbols=["*"],
+    exchanges=["*"],
+    depth=20,
+)
+
         async for event in stream:
             print("event: ",event)
 
