@@ -566,27 +566,32 @@ async def websocket_stream(websocket: WebSocket) -> None:
 
 
 @app.websocket("/raw")
-async def websocket_raw(
-    websocket: WebSocket,
-    mode: str | None = Query(None),
-    symbol: str | None = Query(None),
-    symbols: list[str] | None = Query(None),
-    channels: list[str] | None = Query(None),
-    depth: int | None = Query(None),
-    raw: bool | None = Query(None),
-) -> None:
+async def websocket_raw(websocket: WebSocket):
+    params = websocket.query_params
+
+    mode_value = (params.get("mode") or "").strip().lower()
+
+    symbol = params.get("symbol")
+    symbols = params.getlist("symbols")
+    channels = params.getlist("channels")
+    depth = params.get("depth")
+    raw = params.get("raw")
+
     await websocket.accept()
-    mode_value = (mode or "").strip().lower()
+
+    # unified mode
     if mode_value in UNIFIED_RAW_MODES:
         await _websocket_raw_unified(websocket)
         return
-    requested_symbols: list[str] | None = None
+
+    # combine symbol lists
     if symbol and symbols:
         requested_symbols = [*symbols, symbol]
     elif symbol:
         requested_symbols = [symbol]
     else:
         requested_symbols = symbols
+
     await _websocket_raw_direct(
         websocket,
         symbols=requested_symbols,
