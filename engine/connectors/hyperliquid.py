@@ -171,6 +171,17 @@ class HyperliquidConnector(ExchangeConnector):
         base = normalized.split("/", 1)[0]
         return base.split("-", 1)[0]
 
+    def _pair_symbol(self, normalized: str, coin: str) -> str:
+        candidate = (normalized or "").upper()
+        if "/" in candidate:
+            return candidate
+        for pair, mapped_coin in self._DEFAULT_COIN_MAP.items():
+            base = pair.split("/", 1)[0]
+            if candidate in {pair, mapped_coin, base}:
+                return pair
+        fallback_base = candidate or coin.upper()
+        return f"{fallback_base}/USDT"
+
     async def _maybe_send_pending_subscriptions(self) -> None:
         async with self._subscription_lock:
             if not self._subscription_payloads or not self._ws or self._ws.closed:
@@ -229,7 +240,9 @@ class HyperliquidConnector(ExchangeConnector):
         if price is None or size is None or ts is None:
             return None
         side = self._side_from_payload(data.get("side"))
-        normalized_symbol = normalize_symbol(self.exchange, data.get("symbol") or coin)
+        normalized_symbol = self._pair_symbol(
+            normalize_symbol(self.exchange, data.get("symbol") or coin), coin
+        )
         raw_payload = {"channel": "trades", "data": data} if self._raw_mode else None
         return Trade(
             exchange=self.exchange,
@@ -257,7 +270,9 @@ class HyperliquidConnector(ExchangeConnector):
         if self._depth is not None:
             bids = bids[: self._depth]
             asks = asks[: self._depth]
-        normalized_symbol = normalize_symbol(self.exchange, data.get("symbol") or coin)
+        normalized_symbol = self._pair_symbol(
+            normalize_symbol(self.exchange, data.get("symbol") or coin), coin
+        )
         raw_payload = {"channel": "l2Book", "data": data} if self._raw_mode else None
         return OrderBook(
             exchange=self.exchange,

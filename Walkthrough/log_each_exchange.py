@@ -36,7 +36,7 @@ SYMBOLS = ["BTC/USDT"]
 CHANNELS = ["trades"]
 
 
-    async def log_single_exchange(stream: Stream, exchange: str, aliases: Sequence[str]) -> None:
+async def log_single_exchange(stream: Stream, exchange: str, aliases: Sequence[str]) -> None:
     print(f"=== {exchange} connectors ===")
     for variant in SYMBOL_VARIANTS:
         print(f"[{exchange}] trying symbols={variant}")
