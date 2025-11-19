@@ -4,12 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kk0"
-version = "0.1.0"
+version = "0.1.5"
 description = "Python SDK for the 3kk0 unified streaming API"
 authors = [{name = "Oliver Taylor"}]
 readme = "README.md"
 requires-python = ">=3.8"
-license = { text = "MIT" }
+license = "MIT"
 dependencies = [
     "websockets>=12.0"
 ]
@@ -17,10 +17,7 @@ dependencies = [
 [project.urls]
 Homepage = "https://github.com/OliverTaylor246/Ekko"
 
-[tool.setuptools]
-package-dir = {"" = "sdk/python"}
-
 [tool.setuptools.packages.find]
-where = ["sdk/python"]
+where = ["."]
 include = ["kk0"]
 exclude = ["tests*", "ekko*"]
