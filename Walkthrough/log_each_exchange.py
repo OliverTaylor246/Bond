@@ -23,21 +23,32 @@ EXCHANGE_GROUPS = [
     ("bybit", ["bybit"]),
     ("hyperliquid", ["hyperliquid"]),
 ]
+
+SYMBOL_VARIANTS = [
+    "BTC/USDT",
+    "BTC:USDT",
+    "BTC-USDT",
+    "BTCUSDT",
+    "BTC.USDT",
+    "/BTC",
+]
 SYMBOLS = ["BTC/USDT"]
 CHANNELS = ["trades"]
 
 
-async def log_single_exchange(stream: Stream, exchange: str, aliases: Sequence[str]) -> None:
-    print(f"subscribing to {exchange} aliases={aliases}")
-    await stream.subscribe(channels=CHANNELS, symbols=SYMBOLS, exchanges=aliases)
-    try:
-        while True:
-            event = await asyncio.wait_for(stream.__anext__(), timeout=5)
-            if event.get("exchange") in aliases:
-                print(f"{exchange} → {event}")
-                return
-    except asyncio.TimeoutError:
-        print(f"{exchange} → no events after 5s, moving on")
+    async def log_single_exchange(stream: Stream, exchange: str, aliases: Sequence[str]) -> None:
+    print(f"=== {exchange} connectors ===")
+    for variant in SYMBOL_VARIANTS:
+        print(f"[{exchange}] trying symbols={variant}")
+        await stream.subscribe(channels=CHANNELS, symbols=[variant], exchanges=aliases)
+        try:
+            while True:
+                event = await asyncio.wait_for(stream.__anext__(), timeout=5)
+                if event.get("exchange") in aliases:
+                    print(f"[{exchange}/{variant}] → {event}")
+                    break
+        except asyncio.TimeoutError:
+            print(f"[{exchange}/{variant}] → no events after 5s")
 
 
 async def main() -> None:
