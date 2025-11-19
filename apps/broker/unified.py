@@ -10,7 +10,7 @@ import logging
 import time
 from typing import Any, Dict, List, Optional, Set
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect
 
 from engine.aggregation import AggregationConfig, AggregationEngine, subscription_filter
 from engine.connectors import (
@@ -30,6 +30,15 @@ DEFAULT_DEPTH = 20
 MAX_LAG_MS = 100
 
 
+RAW_CONNECTOR_CLASSES = (
+    BinanceConnector,
+    BybitConnector,
+    HyperliquidConnector,
+)
+
+UNIFIED_RAW_MODES = {"unified", "broker", "manager", "aggregated"}
+
+
 HEARTBEAT_INTERVAL_SEC = 30
 
 
@@ -42,6 +51,7 @@ class UnifiedBrokerManager:
         self._flush_interval = max(self._agg.config.max_lag_ms / 1000.0, 0.05)
         self._clients: Dict[WebSocket, Dict[str, Any]] = {}
         self._clients_lock = asyncio.Lock()
+        self._raw_clients: Set[WebSocket] = set()
         self._client_depths: Dict[WebSocket, int] = {}
         self._raw_subscribers = 0
         self._raw_mode_enabled = False
@@ -196,6 +206,13 @@ class UnifiedBrokerManager:
                 subscribers.append(ws)
         for ws in subscribers:
             asyncio.create_task(self._safe_send(ws, event))
+        await self._broadcast_raw(event)
+
+    async def _broadcast_raw(self, event: BaseEvent) -> None:
+        async with self._clients_lock:
+            raw_clients = list(self._raw_clients)
+        for ws in raw_clients:
+            asyncio.create_task(self._safe_send(ws, event))
 
     async def _safe_send(self, websocket: WebSocket, event: BaseEvent) -> None:
         try:
@@ -244,6 +261,14 @@ class UnifiedBrokerManager:
         task = self._heartbeat_tasks.pop(websocket, None)
         if task:
             task.cancel()
+
+    async def register_raw(self, websocket: WebSocket) -> None:
+        async with self._clients_lock:
+            self._raw_clients.add(websocket)
+
+    async def unregister_raw(self, websocket: WebSocket) -> None:
+        async with self._clients_lock:
+            self._raw_clients.discard(websocket)
 
     async def _heartbeat_loop(self, websocket: WebSocket) -> None:
         try:
@@ -419,6 +444,88 @@ app = FastAPI(
 )
 
 
+async def _websocket_raw_unified(websocket: WebSocket) -> None:
+    await manager.register_raw(websocket)
+    try:
+        await websocket.wait_closed()
+    except WebSocketDisconnect:
+        pass
+    finally:
+        await manager.unregister_raw(websocket)
+
+
+async def _pump_connector_events(websocket: WebSocket, connector: ExchangeConnector) -> None:
+    try:
+        async for event in connector:
+            try:
+                await websocket.send_json(event.to_wire())
+            except RuntimeError:
+                break
+    except asyncio.CancelledError:
+        pass
+    except Exception:
+        logger.exception(
+            "Raw direct connector failed: %s", connector.exchange, exc_info=True
+        )
+        with contextlib.suppress(Exception):
+            await websocket.close(code=1011, reason="Raw connector failure")
+
+
+async def _websocket_raw_direct(
+    websocket: WebSocket,
+    symbols: list[str] | None,
+    channels: list[str] | None,
+    depth: int | None,
+    raw: bool | None,
+) -> None:
+    normalized_symbols = manager._normalize_symbols(symbols) or set(DEFAULT_SYMBOLS)
+    normalized_symbols = [sym for sym in normalized_symbols if sym != "*"]
+    if not normalized_symbols:
+        normalized_symbols = list(DEFAULT_SYMBOLS)
+    channel_set = manager._normalize_channels(channels)
+    channel_list = sorted(channel_set)
+    depth_value = manager._normalize_depth(depth) or DEFAULT_DEPTH
+    raw_mode = manager._to_bool(raw)
+
+    connectors: list[ExchangeConnector] = []
+    tasks: list[asyncio.Task[None]] = []
+    try:
+        for connector_cls in RAW_CONNECTOR_CLASSES:
+            connector = connector_cls()
+            connectors.append(connector)
+            await connector.connect()
+            await connector.subscribe(
+                symbols=normalized_symbols,
+                channels=channel_list,
+                depth=depth_value,
+                raw=raw_mode,
+            )
+            tasks.append(asyncio.create_task(_pump_connector_events(websocket, connector)))
+        await websocket.send_json(
+            {
+                "type": "system",
+                "status": "connected",
+                "mode": "raw-direct",
+                "symbols": normalized_symbols,
+                "channels": channel_list,
+                "depth": depth_value,
+                "raw": raw_mode,
+            }
+        )
+        await websocket.wait_closed()
+    except Exception:
+        logger.exception("Failed to start raw direct stream")
+        with contextlib.suppress(Exception):
+            await websocket.close(code=1011, reason="Raw connector setup failed")
+    finally:
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        for connector in connectors:
+            await connector.shutdown()
+
+
 @app.on_event("startup")
 async def _startup() -> None:
     await manager.start()
@@ -456,3 +563,34 @@ async def websocket_stream(websocket: WebSocket) -> None:
         pass
     finally:
         await manager.unregister(websocket)
+
+
+@app.websocket("/raw")
+async def websocket_raw(
+    websocket: WebSocket,
+    mode: str | None = Query(None),
+    symbol: str | None = Query(None),
+    symbols: list[str] | None = Query(None),
+    channels: list[str] | None = Query(None),
+    depth: int | None = Query(None),
+    raw: bool | None = Query(None),
+) -> None:
+    await websocket.accept()
+    mode_value = (mode or "").strip().lower()
+    if mode_value in UNIFIED_RAW_MODES:
+        await _websocket_raw_unified(websocket)
+        return
+    requested_symbols: list[str] | None = None
+    if symbol and symbols:
+        requested_symbols = [*symbols, symbol]
+    elif symbol:
+        requested_symbols = [symbol]
+    else:
+        requested_symbols = symbols
+    await _websocket_raw_direct(
+        websocket,
+        symbols=requested_symbols,
+        channels=channels,
+        depth=depth,
+        raw=raw,
+    )

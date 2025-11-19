@@ -584,3 +584,12 @@ See [CLAUDE.md](CLAUDE.md) for architecture details and AI agent guidelines.
 Apache License 2.0 - See [LICENSE](LICENSE) file for details.
 
 Copyright 2024-2025 3KK0 Contributors
+### Raw WebSocket endpoint
+
+If you need the unfiltered, raw stream (no symbol/channel filtering), connect to:
+
+```
+wss://3kk0-broker-production.up.railway.app/raw
+```
+
+This endpoint emits every normalized event the broker sees. It’s useful for debugging or building your own filtering.
