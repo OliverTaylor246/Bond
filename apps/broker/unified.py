@@ -447,7 +447,8 @@ app = FastAPI(
 async def _websocket_raw_unified(websocket: WebSocket) -> None:
     await manager.register_raw(websocket)
     try:
-        await websocket.wait_closed()
+        while True:
+            await websocket.receive()
     except WebSocketDisconnect:
         pass
     finally:
@@ -512,7 +513,11 @@ async def _websocket_raw_direct(
                 "raw": raw_mode,
             }
         )
-        await websocket.wait_closed()
+        try:
+            while True:
+                await websocket.receive()
+        except WebSocketDisconnect:
+            pass
     except Exception:
         logger.exception("Failed to start raw direct stream")
         with contextlib.suppress(Exception):
