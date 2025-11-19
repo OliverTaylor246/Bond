@@ -18,7 +18,7 @@ from engine.connectors.hyperliquid import HyperliquidConnector
 
 
 CONNECTORS = [
-    #("binance", BinanceConnector()),
+    ("binance", BinanceConnector()),
     ("bybit", BybitConnector()),
     ("hyperliquid", HyperliquidConnector()),
 ]
