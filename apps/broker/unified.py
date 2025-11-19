@@ -51,7 +51,7 @@ class UnifiedBrokerManager:
             BinanceConnector(),
             BybitConnector(),
             HyperliquidConnector(),
-            ExtendedExchangeConnector(),
+            # ExtendedExchangeConnector(),  # Disabled temporarily; re-enable later.
         ]
         self._connector_subscription_specs: Dict[str, Dict[str, List[str]]] = {}
         self._connector_tasks: List[asyncio.Task[None]] = []
