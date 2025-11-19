@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 class ExtendedExchangeConnector(ExchangeConnector):
     exchange = "extended"
-    _WS_URL = "wss://api.extended.exchange/ws/public"
+    _WS_URL = "https://api.starknet.extended.exchange/"
     _PING_INTERVAL_SEC = 30
     _INITIAL_BACKOFF_SEC = 1.0
     _MAX_BACKOFF_SEC = 30.0
