@@ -19,6 +19,8 @@ from engine.connectors import (
     ExchangeConnector,
     ExtendedExchangeConnector,
     HyperliquidConnector,
+    LighterConnector,
+    OkxConnector,
 )
 from engine.schemas import BaseEvent, EventType, Heartbeat, Millis, RawMessage, normalize_symbol
 
@@ -34,6 +36,8 @@ RAW_CONNECTOR_CLASSES = (
     BinanceConnector,
     BybitConnector,
     HyperliquidConnector,
+    OkxConnector,
+    LighterConnector,
 )
 
 UNIFIED_RAW_MODES = {"unified", "broker", "manager", "aggregated"}
@@ -61,6 +65,8 @@ class UnifiedBrokerManager:
             BinanceConnector(),
             BybitConnector(),
             HyperliquidConnector(),
+            OkxConnector(),
+            LighterConnector(),
             # ExtendedExchangeConnector(),  # Disabled temporarily; re-enable later.
         ]
         self._connector_subscription_specs: Dict[str, Dict[str, List[str]]] = {}
@@ -478,6 +484,7 @@ async def _websocket_raw_direct(
     channels: list[str] | None,
     depth: int | None,
     raw: bool | None,
+    exchange: str | None = None,
 ) -> None:
     normalized_symbols = manager._normalize_symbols(symbols) or set(DEFAULT_SYMBOLS)
     normalized_symbols = [sym for sym in normalized_symbols if sym != "*"]
@@ -487,11 +494,29 @@ async def _websocket_raw_direct(
     channel_list = sorted(channel_set)
     depth_value = manager._normalize_depth(depth) or DEFAULT_DEPTH
     raw_mode = manager._to_bool(raw)
+    exchange_filter = exchange.strip().lower() if exchange else None
+    connector_classes = list(RAW_CONNECTOR_CLASSES)
+    if exchange_filter:
+        connector_classes = [
+            cls
+            for cls in RAW_CONNECTOR_CLASSES
+            if getattr(cls, "exchange", "").lower() == exchange_filter
+        ]
+        if not connector_classes:
+            await websocket.send_json(
+                {
+                    "type": "system",
+                    "status": "error",
+                    "reason": f"unknown exchange '{exchange}'",
+                }
+            )
+            await websocket.close(code=1003)
+            return
 
     connectors: list[ExchangeConnector] = []
     tasks: list[asyncio.Task[None]] = []
     try:
-        for connector_cls in RAW_CONNECTOR_CLASSES:
+        for connector_cls in connector_classes:
             connector = connector_cls()
             connectors.append(connector)
             await connector.connect()
@@ -511,6 +536,7 @@ async def _websocket_raw_direct(
                 "channels": channel_list,
                 "depth": depth_value,
                 "raw": raw_mode,
+                "exchange": exchange_filter,
             }
         )
         try:
@@ -581,6 +607,7 @@ async def websocket_raw(websocket: WebSocket):
     channels = params.getlist("channels")
     depth = params.get("depth")
     raw = params.get("raw")
+    exchange = params.get("exchange")
 
     await websocket.accept()
 
@@ -603,4 +630,5 @@ async def websocket_raw(websocket: WebSocket):
         channels=channels,
         depth=depth,
         raw=raw,
+        exchange=exchange,
     )

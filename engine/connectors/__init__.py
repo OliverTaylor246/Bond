@@ -9,7 +9,9 @@ from .ccxt_pro import (
 )
 from .extended import ExtendedExchangeConnector
 from .hyperliquid import HyperliquidConnector
+from .lighter import LighterConnector
 from .mock import MockConnector
+from .okx import OkxConnector
 
 __all__ = [
     "ExchangeConnector",
@@ -21,5 +23,7 @@ __all__ = [
     "CCXTExtendedExchangeConnector",
     "ExtendedExchangeConnector",
     "HyperliquidConnector",
+    "LighterConnector",
     "MockConnector",
+    "OkxConnector",
 ]

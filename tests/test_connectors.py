@@ -5,6 +5,8 @@ from engine.connectors import (
     BybitConnector,
     ExtendedExchangeConnector,
     HyperliquidConnector,
+    LighterConnector,
+    OkxConnector,
 )
 from engine.schemas import BookUpdateType, Side
 
@@ -236,3 +238,76 @@ def test_extended_trade_and_orderbook_normalization():
     assert delta.sequence == 401
     assert delta.prev_sequence == 400
     assert delta.depth == len(delta.bids)
+
+
+def test_okx_trade_and_orderbook_normalization():
+    connector = OkxConnector()
+    trade_entry = {
+        "instId": "BTC-USDT",
+        "tradeId": "9001",
+        "px": "42000.5",
+        "sz": "0.05",
+        "side": "buy",
+        "ts": "1726330000000",
+    }
+    trade = connector._normalize_trade(trade_entry, {"channel": "trades", "instId": "BTC-USDT"})
+
+    assert trade.exchange == "okx"
+    assert trade.symbol == "BTC/USDT"
+    assert trade.price == 42000.5
+    assert trade.size == 0.05
+    assert trade.side == Side.BUY
+    assert trade.trade_id == "9001"
+
+    orderbook_entry = {
+        "asks": [["42001.0", "1"]],
+        "bids": [["42000.0", "2"]],
+        "ts": "1726330000500",
+        "seqNum": 200,
+        "preSeqNum": 199,
+        "action": "snapshot",
+    }
+    snapshot = connector._normalize_orderbook(orderbook_entry, {"channel": "books-l2-tbt", "instId": "BTC-USDT"})
+
+    assert snapshot.update_type == BookUpdateType.SNAPSHOT
+    assert snapshot.sequence == 200
+    assert snapshot.prev_sequence == 199
+    assert snapshot.depth == connector._depth
+    assert snapshot.bids[0] == (42000.0, 2.0)
+    assert snapshot.asks[0] == (42001.0, 1.0)
+
+
+def test_lighter_trade_and_orderbook_normalization():
+    connector = LighterConnector()
+    connector._market_map[13] = "TAO"
+
+    trade_payload = {
+        "trade_id": 14035051,
+        "price": "3335.65",
+        "size": "0.1187",
+        "side": "sell",
+        "timestamp": 1722339648,
+    }
+    trade = connector._normalize_trade(trade_payload, 13)
+
+    assert trade.exchange == "lighter"
+    assert trade.symbol == "TAO/USDC"
+    assert trade.price == 3335.65
+    assert trade.size == 0.1187
+    assert trade.side == Side.SELL
+    assert trade.trade_id == "14035051"
+
+    orderbook_payload = {
+        "code": 0,
+        "asks": [{"price": "3327.46", "size": "29.0915"}],
+        "bids": [{"price": "3338.80", "size": "10.2898"}],
+        "offset": 41692864,
+    }
+    book = connector._normalize_orderbook(orderbook_payload, 13)
+
+    assert book.exchange == "lighter"
+    assert book.symbol == "TAO/USDC"
+    assert book.update_type == BookUpdateType.SNAPSHOT
+    assert book.depth == connector._depth
+    assert book.bids[0] == (3338.8, 10.2898)
+    assert book.asks[0] == (3327.46, 29.0915)
