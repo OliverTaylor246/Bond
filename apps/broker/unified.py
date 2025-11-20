@@ -494,13 +494,19 @@ async def _websocket_raw_direct(
     channel_list = sorted(channel_set)
     depth_value = manager._normalize_depth(depth) or DEFAULT_DEPTH
     raw_mode = manager._to_bool(raw)
-    exchange_filter = exchange.strip().lower() if exchange else None
+    exchange_filter: List[str] = []
+    if exchange:
+        exchange_filter = [
+            ex.strip().lower()
+            for ex in str(exchange).split(",")
+            if ex and ex.strip()
+        ]
     connector_classes = list(RAW_CONNECTOR_CLASSES)
     if exchange_filter:
         connector_classes = [
             cls
             for cls in RAW_CONNECTOR_CLASSES
-            if getattr(cls, "exchange", "").lower() == exchange_filter
+            if getattr(cls, "exchange", "").lower() in exchange_filter
         ]
         if not connector_classes:
             await websocket.send_json(
@@ -536,7 +542,7 @@ async def _websocket_raw_direct(
                 "channels": channel_list,
                 "depth": depth_value,
                 "raw": raw_mode,
-                "exchange": exchange_filter,
+                "exchange": exchange_filter or None,
             }
         )
         try:
@@ -608,6 +614,11 @@ async def websocket_raw(websocket: WebSocket):
     depth = params.get("depth")
     raw = params.get("raw")
     exchange = params.get("exchange")
+    # Support multi-query params like ?exchanges=binance&exchanges=bybit
+    if not exchange:
+        exchange_list = params.getlist("exchanges")
+        if exchange_list:
+            exchange = ",".join(exchange_list)
 
     await websocket.accept()
 

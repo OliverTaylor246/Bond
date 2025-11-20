@@ -15,6 +15,8 @@ class AggregationConfig:
 
 
 class AggregationEngine:
+    _FUTURE_TOLERANCE_MS = 5_000
+
     def __init__(self, config: Optional[AggregationConfig] = None) -> None:
         self.config = config or AggregationConfig()
         self._heap: List[Tuple[int, int, BaseEvent]] = []
@@ -33,6 +35,9 @@ class AggregationEngine:
 
     def ingest(self, event: BaseEvent) -> None:
         ts = self._event_sort_key(event)
+        now_ms = int(time.time() * 1000)
+        if ts > now_ms + self._FUTURE_TOLERANCE_MS:
+            ts = now_ms  # clamp far future timestamps so they don't block flush
         self._counter += 1
         heapq.heappush(self._heap, (ts, self._counter, event))
 
