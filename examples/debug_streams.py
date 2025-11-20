@@ -47,21 +47,24 @@ def _parse_list(env: str, default: Iterable[str]) -> List[str]:
 
 CHANNELS = _parse_list("KK0_CHANNELS", ["trades"])
 SYMBOLS = _parse_list("KK0_SYMBOLS", ["BTC/USDT"])
-EXCHANGES = _parse_list("KK0_EXCHANGES", ["*"])
+EXCHANGES = _parse_list(
+    "KK0_EXCHANGES",
+    ["hyperliquid", "binance", "bybit", "okx", "lighter"],
+)
 DEPTH = int(os.getenv("KK0_DEPTH") or 20)
 
 STREAM_URL = os.getenv("KK0_STREAM_URL", "ws://localhost:8000/stream")
 RAW_URL_BASE = os.getenv("KK0_RAW_URL") or STREAM_URL.rsplit("/", 1)[0] + "/raw"
 
 
-def _build_raw_url() -> str:
+def _build_raw_url(exchange: str | None) -> str:
     # If caller supplied full URL with params, keep it
     if "?" in RAW_URL_BASE:
         return RAW_URL_BASE
     params = {
         "channels": ",".join(CHANNELS),
         "symbols": ",".join(SYMBOLS),
-        "exchange": ",".join(EXCHANGES),
+        "exchange": exchange or ",".join(EXCHANGES),
         "depth": str(DEPTH),
         "raw": "true",
     }
@@ -104,25 +107,32 @@ async def _consume(label: str, stream: Stream, expect_json: bool, max_events: in
 
 
 async def run_normalized():
-    async with Stream(STREAM_URL) as stream:
-        await stream.subscribe(
-            channels=CHANNELS, symbols=SYMBOLS, exchanges=EXCHANGES, depth=DEPTH
-        )
-        await _consume("normalized", stream, expect_json=True)
+    for exchange in EXCHANGES:
+        label = f"normalized:{exchange}"
+        async with Stream(STREAM_URL) as stream:
+            await stream.subscribe(
+                channels=CHANNELS,
+                symbols=SYMBOLS,
+                exchanges=[exchange],
+                depth=DEPTH,
+            )
+            await _consume(label, stream, expect_json=True)
 
 
 async def run_raw():
-    raw_url = _build_raw_url()
-    async with Stream(raw_url) as stream:
-        # /raw endpoint ignores subscribe messages; filters must be in URL
-        await _consume("raw", stream, expect_json=True)
+    for exchange in EXCHANGES:
+        raw_url = _build_raw_url(exchange)
+        label = f"raw:{exchange}"
+        async with Stream(raw_url) as stream:
+            # /raw endpoint ignores subscribe messages; filters must be in URL
+            await _consume(label, stream, expect_json=True)
 
 
 async def main():
     print(
         "Starting stream debug with\n"
         f"  normalized: {STREAM_URL}\n"
-        f"  raw:        {_build_raw_url()}\n"
+        f"  raw (per-exchange): {_build_raw_url('<exchange>')}\n"
         f"  channels:   {CHANNELS}\n"
         f"  symbols:    {SYMBOLS}\n"
         f"  exchanges:  {EXCHANGES}\n"
