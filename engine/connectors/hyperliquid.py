@@ -20,6 +20,7 @@ from ..schemas import (
     Trade,
     normalize_symbol,
 )
+from ..orderbook import LocalOrderBook
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +52,7 @@ class HyperliquidConnector(ExchangeConnector):
         self._event_queue: asyncio.Queue[BaseEvent] = asyncio.Queue()
         self._run_task: Optional[asyncio.Task[None]] = None
         self._ping_task: Optional[asyncio.Task[None]] = None
+        self._books: Dict[str, LocalOrderBook] = {}
 
     async def connect(self) -> None:
         if self._run_task and not self._run_task.done():
@@ -230,8 +232,8 @@ class HyperliquidConnector(ExchangeConnector):
         elif channel == "l2Book":
             data = payload.get("data")
             if isinstance(data, dict):
-                event = self._normalize_orderbook(data)
-                if event:
+                events = self._normalize_orderbook(data)
+                for event in events:
                     await self._event_queue.put(event)
 
     def _normalize_trade(self, data: Dict[str, Any]) -> Trade | None:
@@ -259,13 +261,13 @@ class HyperliquidConnector(ExchangeConnector):
             raw=raw_payload,
         )
 
-    def _normalize_orderbook(self, data: Dict[str, Any]) -> OrderBook | None:
+    def _normalize_orderbook(self, data: Dict[str, Any]) -> List[OrderBook]:
         coin = data.get("coin")
         if not coin:
-            return None
+            return []
         ts = self._to_millis(data.get("time"))
         if ts is None:
-            return None
+            return []
         levels = data.get("levels") or [[], []]
         bids = self._parse_levels(levels[0] if len(levels) > 0 else [], reverse=True)
         asks = self._parse_levels(levels[1] if len(levels) > 1 else [], reverse=False)
@@ -273,18 +275,25 @@ class HyperliquidConnector(ExchangeConnector):
             bids = bids[: self._depth]
             asks = asks[: self._depth]
         normalized_symbol = self._pair_symbol(data.get("symbol") or coin, coin)
+
+        book = self._books.setdefault(normalized_symbol, LocalOrderBook(depth=self._depth))
+        book.snapshot("bids", bids)
+        book.snapshot("asks", asks)
+        bids_out, asks_out = book.top()
+
         raw_payload = {"channel": "l2Book", "data": data} if self._raw_mode else None
-        return OrderBook(
+        ob = OrderBook(
             exchange=self.exchange,
             symbol=normalized_symbol,
-            bids=bids,
-            asks=asks,
+            bids=bids_out,
+            asks=asks_out,
             ts_event=ts,
             ts_exchange=ts,
             depth=self._depth,
             update_type=BookUpdateType.SNAPSHOT,
             raw=raw_payload,
         )
+        return [ob]
 
     def _parse_levels(
         self, levels: Iterable[Dict[str, Any]], *, reverse: bool

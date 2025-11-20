@@ -80,6 +80,7 @@ class UnifiedBrokerManager:
             "start_time": time.time(),
             "reconnects": 0,
         }
+        self._seq_internal = 0
 
     async def start(self) -> None:
         if self._running:
@@ -152,6 +153,9 @@ class UnifiedBrokerManager:
     async def _run_connector(self, connector: ExchangeConnector) -> None:
         try:
             async for event in connector:
+                # Assign internal sequencing for downstream ordering
+                event.ts_internal = self._now_ns()
+                event.seq_internal = self._next_seq()
                 await self._event_queue.put(event)
                 if event.raw and self._raw_subscribers > 0:
                     raw_event = self._build_raw_event(event)
@@ -440,6 +444,13 @@ class UnifiedBrokerManager:
     @staticmethod
     def _now_ms() -> Millis:
         return int(time.time() * 1000)
+
+    def _now_ns(self) -> int:
+        return time.monotonic_ns()
+
+    def _next_seq(self) -> int:
+        self._seq_internal += 1
+        return self._seq_internal
 
 
 manager = UnifiedBrokerManager()

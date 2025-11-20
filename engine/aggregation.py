@@ -54,6 +54,9 @@ class AggregationEngine:
 
     @staticmethod
     def _event_sort_key(event: BaseEvent) -> int:
+        if getattr(event, "ts_internal", None) is not None:
+            # convert ns to ms for ordering
+            return int(event.ts_internal // 1_000_000)
         if event.ts_exchange is not None:
             return event.ts_exchange
         return event.ts_event

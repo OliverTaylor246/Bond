@@ -53,6 +53,8 @@ class BaseEvent:
     type: EventType
     exchange: str
     symbol: str
+    ts_internal: Optional[int] = None  # monotonic ns since start of process
+    seq_internal: Optional[int] = None  # monotonic counter assigned by broker
     ts_event: Millis
     ts_exchange: Optional[Millis] = None
     raw: Optional[Dict[str, Any]] = None

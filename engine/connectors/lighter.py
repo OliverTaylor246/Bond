@@ -22,6 +22,7 @@ from ..schemas import (
     normalize_symbol,
     unify_side,
 )
+from ..orderbook import LocalOrderBook
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +57,7 @@ class LighterConnector(ExchangeConnector):
         self._book_initialized: Set[int] = set()
         self._last_offset: Dict[int, int] = {}
         self._current_subscriptions: Set[str] = set()
+        self._books: Dict[int, LocalOrderBook] = {}
 
     async def connect(self) -> None:
         if self._run_task and not self._run_task.done():
@@ -220,8 +222,8 @@ class LighterConnector(ExchangeConnector):
         elif channel.startswith("order_book:"):
             book_payload = payload.get("order_book")
             if book_payload:
-                book = self._normalize_orderbook(book_payload, market_id)
-                if book:
+                books = self._normalize_orderbook(book_payload, market_id)
+                for book in books:
                     await self._event_queue.put(book)
 
     def _normalize_trade(self, entry: Dict[str, Any], market_id: int) -> Trade | None:
@@ -247,39 +249,17 @@ class LighterConnector(ExchangeConnector):
             raw=raw_payload,
         )
 
-    def _normalize_orderbook(self, book: Dict[str, Any], market_id: int) -> OrderBook | None:
+    def _normalize_orderbook(self, book: Dict[str, Any], market_id: int) -> List[OrderBook]:
         symbol = self._market_map.get(market_id) or str(market_id)
         normalized_symbol = self._resolve_symbol(symbol)
         asks = self._parse_levels(book.get("asks", []))
         bids = self._parse_levels(book.get("bids", []))
-        if self._depth:
-            bids = bids[: self._depth]
-            asks = asks[: self._depth]
         ts = self._now_ms()
         offset = self._to_int(book.get("offset"))
-        update_type = (
-            BookUpdateType.SNAPSHOT
-            if market_id not in self._book_initialized
-            else BookUpdateType.DELTA
-        )
-        self._book_initialized.add(market_id)
         prev_sequence = self._last_offset.get(market_id)
         if offset is not None:
             self._last_offset[market_id] = offset
-        raw_payload = {"channel": "order_book", "market_id": market_id, "data": book} if self._raw_mode else None
-        return OrderBook(
-            exchange=self.exchange,
-            symbol=normalized_symbol,
-            bids=bids,
-            asks=asks,
-            ts_event=ts,
-            ts_exchange=ts,
-            depth=self._depth,
-            sequence=offset,
-            prev_sequence=prev_sequence,
-            update_type=update_type,
-            raw=raw_payload,
-        )
+\n+        lob = self._books.setdefault(market_id, LocalOrderBook(depth=self._depth))\n+        # Lighter messages are snapshots; apply as reset and emit one snapshot\n+        lob.snapshot(\"bids\", bids)\n+        lob.snapshot(\"asks\", asks)\n+        bids_out, asks_out = lob.top()\n+        raw_payload = {\"channel\": \"order_book\", \"market_id\": market_id, \"data\": book} if self._raw_mode else None\n+        ob = OrderBook(\n+            exchange=self.exchange,\n+            symbol=normalized_symbol,\n+            bids=bids_out,\n+            asks=asks_out,\n+            ts_event=ts,\n+            ts_exchange=ts,\n+            depth=self._depth,\n+            sequence=offset,\n+            prev_sequence=prev_sequence,\n+            update_type=BookUpdateType.SNAPSHOT,\n+            raw=raw_payload,\n+        )\n+        return [ob]\n*** End Patch
 
     @staticmethod
     def _parse_levels(levels: Iterable[Any]) -> List[PriceSize]:
