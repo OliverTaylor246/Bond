@@ -24,16 +24,20 @@ from typing import Iterable, List
 # SDK import
 root = Path(__file__).resolve().parents
 sdk_path: Path | None = None
+repo_root: Path | None = None
 for parent in root:
     candidate = parent / "sdk" / "python"
     if candidate.exists():
         sdk_path = candidate
+        repo_root = parent
         break
 
 if not sdk_path:
     raise SystemExit("kk0 SDK directory not found in repo tree")
 
 sys.path.insert(0, str(sdk_path))
+if repo_root:
+    sys.path.insert(0, str(repo_root))
 
 from kk0 import Stream  # noqa: E402
 
