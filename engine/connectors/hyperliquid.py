@@ -165,16 +165,20 @@ class HyperliquidConnector(ExchangeConnector):
         return channel
 
     def _symbol_to_coin(self, symbol: str) -> str:
-        normalized = symbol.upper()
+        normalized = symbol.upper().lstrip("/-_")
         if normalized in self._DEFAULT_COIN_MAP:
             return self._DEFAULT_COIN_MAP[normalized]
         base = normalized.split("/", 1)[0]
         return base.split("-", 1)[0]
 
     def _pair_symbol(self, normalized: str, coin: str) -> str:
-        candidate = (normalized or "").upper()
+        candidate = (normalized or "").upper().lstrip("/-_")
         if "/" in candidate:
-            return candidate
+            base, _, quote = candidate.partition("/")
+            if base and quote:
+                return f"{base}/{quote}"
+            if base:
+                return f"{base}/USDT"
         for pair, mapped_coin in self._DEFAULT_COIN_MAP.items():
             base = pair.split("/", 1)[0]
             if candidate in {pair, mapped_coin, base}:
@@ -240,9 +244,7 @@ class HyperliquidConnector(ExchangeConnector):
         if price is None or size is None or ts is None:
             return None
         side = self._side_from_payload(data.get("side"))
-        normalized_symbol = self._pair_symbol(
-            normalize_symbol(self.exchange, data.get("symbol") or coin), coin
-        )
+        normalized_symbol = self._pair_symbol(data.get("symbol") or coin, coin)
         raw_payload = {"channel": "trades", "data": data} if self._raw_mode else None
         return Trade(
             exchange=self.exchange,
@@ -270,9 +272,7 @@ class HyperliquidConnector(ExchangeConnector):
         if self._depth is not None:
             bids = bids[: self._depth]
             asks = asks[: self._depth]
-        normalized_symbol = self._pair_symbol(
-            normalize_symbol(self.exchange, data.get("symbol") or coin), coin
-        )
+        normalized_symbol = self._pair_symbol(data.get("symbol") or coin, coin)
         raw_payload = {"channel": "l2Book", "data": data} if self._raw_mode else None
         return OrderBook(
             exchange=self.exchange,
