@@ -1,8 +1,6 @@
 """
-Simple LOB consumer that rebuilds book state from the normalized `/stream` endpoint.
-
-Behaves like a user pulling LOBs: subscribe to orderbook channel, apply snapshots/deltas
-to a local book, and print best bid/ask along with internal sequencing fields.
+Simple LOB consumer that prints orderbook updates from the normalized `/stream`
+endpoint. Useful for sanity-checking that orderbook pushes are arriving.
 
 Usage:
   python examples/debug_lob_consumer.py
@@ -41,10 +39,6 @@ if repo_root:
 
 from kk0 import Stream  # noqa: E402
 
-# Local LOB helper (uses the same helper the connectors use)
-from engine.orderbook import LocalOrderBook  # type: ignore  # noqa: E402
-
-
 STREAM_URL = os.getenv("KK0_STREAM_URL", "ws://localhost:8000/stream")
 EXCHANGE = os.getenv("KK0_EXCHANGE", "hyperliquid")
 SYMBOL = os.getenv("KK0_SYMBOL", "BTC/USDT")
@@ -56,7 +50,6 @@ def _as_list(value: Iterable[str]) -> List[str]:
 
 
 async def main():
-    lob = LocalOrderBook(depth=DEPTH)
     async with Stream(STREAM_URL) as stream:
         await stream.subscribe(
             channels=["orderbook"],
@@ -84,22 +77,14 @@ async def main():
             asks = event.get("asks") or []
             update_type = event.get("update_type")
 
-            # Apply snapshot as full reset, delta as partial update.
-            if update_type == "snapshot":
-                lob.snapshot("bids", bids)
-                lob.snapshot("asks", asks)
-            else:
-                lob.apply_levels("bids", bids)
-                lob.apply_levels("asks", asks)
-
-            best_bids, best_asks = lob.top()
             ts_internal = event.get("ts_internal")
             seq_internal = event.get("seq_internal")
             print(
                 f"[seq={seq_internal} ts_internal={ts_internal}] "
-                f"best_bid={best_bids[0] if best_bids else None} "
-                f"best_ask={best_asks[0] if best_asks else None} "
-                f"levels: bids={len(best_bids)} asks={len(best_asks)}"
+                f"best_bid={bids[0] if bids else None} "
+                f"best_ask={asks[0] if asks else None} "
+                f"levels: bids={len(bids)} asks={len(asks)} "
+                f"update_type={update_type}"
             )
 
 

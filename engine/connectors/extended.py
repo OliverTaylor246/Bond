@@ -14,6 +14,7 @@ from .base import ConnectorError, ExchangeConnector
 from ..schemas import (
     BaseEvent,
     BookUpdateType,
+    MarketType,
     OrderBook,
     PriceSize,
     Trade,
@@ -188,8 +189,9 @@ class ExtendedExchangeConnector(ExchangeConnector):
     def _normalize_trade(self, data: Dict[str, Any], topic: str) -> Trade | None:
         price = self._to_float(data.get("price"))
         size = self._to_float(data.get("quantity"))
-        ts = self._to_millis(data.get("timestamp"))
-        if price is None or size is None or ts is None:
+        ts_exchange = self._to_millis(data.get("timestamp"))
+        ts_event = self._now_ms()
+        if price is None or size is None:
             return None
         symbol = data.get("symbol") or topic.split(".", 1)[-1]
         normalized_symbol = normalize_symbol(self.exchange, symbol)
@@ -201,8 +203,9 @@ class ExtendedExchangeConnector(ExchangeConnector):
             price=price,
             size=size,
             side=side,
-            ts_event=ts,
-            ts_exchange=ts,
+            ts_event=ts_event,
+            ts_exchange=ts_exchange,
+            market_type=MarketType.SPOT,
             trade_id=str(data.get("id")) if data.get("id") is not None else None,
             raw=raw_payload,
         )
@@ -233,15 +236,17 @@ class ExtendedExchangeConnector(ExchangeConnector):
             asks = asks[:depth]
         symbol = data.get("symbol") or topic.split(".", 1)[-1]
         normalized_symbol = normalize_symbol(self.exchange, symbol)
-        ts = self._to_millis(data.get("timestamp") or payload.get("timestamp"))
+        ts_exchange = self._to_millis(data.get("timestamp") or payload.get("timestamp"))
+        ts_event = self._now_ms()
         raw_payload = {"channel": "orderbook", "payload": payload} if self._raw_mode else None
         return OrderBook(
             exchange=self.exchange,
             symbol=normalized_symbol,
             bids=bids,
             asks=asks,
-            ts_event=ts or self._now_ms(),
-            ts_exchange=ts or self._now_ms(),
+            ts_event=ts_event,
+            ts_exchange=ts_exchange,
+            market_type=MarketType.SPOT,
             depth=depth,
             sequence=self._to_int(data.get("sequence")),
             prev_sequence=self._to_int(data.get("prevSequence")),

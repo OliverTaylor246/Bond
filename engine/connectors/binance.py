@@ -14,14 +14,60 @@ from .base import ConnectorError, ExchangeConnector
 from ..schemas import (
     BaseEvent,
     BookUpdateType,
+    MarketType,
     OrderBook,
     PriceSize,
     Side,
+    Ticker,
     Trade,
     normalize_symbol,
 )
 
 logger = logging.getLogger(__name__)
+
+
+class _BookState:
+    def __init__(self, depth: int):
+        self.depth = depth
+        self.bids: Dict[float, float] = {}
+        self.asks: Dict[float, float] = {}
+        self.sequence: Optional[int] = None
+        self.prev_sequence: Optional[int] = None
+        self.is_reset: bool = False
+
+    def _apply_side(self, side: str, levels: List[PriceSize]) -> None:
+        book = self.bids if side == "bids" else self.asks
+        for price, size in levels:
+            if size == 0:
+                book.pop(price, None)
+            else:
+                book[price] = size
+
+    def snapshot(self, bids: List[PriceSize], asks: List[PriceSize], sequence: Optional[int], prev_seq: Optional[int]) -> None:
+        self.bids = {p: s for p, s in bids}
+        self.asks = {p: s for p, s in asks}
+        self.sequence = sequence
+        self.prev_sequence = prev_seq
+        self.is_reset = False
+
+    def apply_delta(self, bids: List[PriceSize], asks: List[PriceSize], sequence: Optional[int], prev_seq: Optional[int]) -> bool:
+        if self.sequence is not None and prev_seq is not None and self.sequence != prev_seq:
+            return False
+        self._apply_side("bids", bids)
+        self._apply_side("asks", asks)
+        self.prev_sequence = prev_seq
+        self.sequence = sequence
+        self.is_reset = False
+        return True
+
+    def top(self) -> tuple[List[PriceSize], List[PriceSize]]:
+        bid_list = sorted(self.bids.items(), key=lambda kv: kv[0], reverse=True)
+        ask_list = sorted(self.asks.items(), key=lambda kv: kv[0])
+        depth = self.depth
+        if depth:
+            bid_list = bid_list[:depth]
+            ask_list = ask_list[:depth]
+        return bid_list, ask_list
 
 
 class BinanceConnector(ExchangeConnector):
@@ -46,6 +92,7 @@ class BinanceConnector(ExchangeConnector):
         self._ws: Optional[websockets.WebSocketClientProtocol] = None
         self._run_task: Optional[asyncio.Task[None]] = None
         self._ping_task: Optional[asyncio.Task[None]] = None
+        self._books: Dict[str, "_BookState"] = {}
 
     async def connect(self) -> None:
         if self._run_task and not self._run_task.done():
@@ -99,6 +146,8 @@ class BinanceConnector(ExchangeConnector):
                 params.add(f"{venue}@trade")
             if "orderbook" in channel_set:
                 params.add(f"{venue}@depth{depth}@100ms")
+            if "ticker" in channel_set:
+                params.add(f"{venue}@ticker")
         async with self._subscription_lock:
             self._symbols = resolved
             self._channels = channel_set
@@ -200,12 +249,17 @@ class BinanceConnector(ExchangeConnector):
             book = self._normalize_orderbook(data, payload.get("stream"))
             if book:
                 await self._event_queue.put(book)
+        elif event_type == "24hrTicker":
+            ticker = self._normalize_ticker(data, payload.get("stream"))
+            if ticker:
+                await self._event_queue.put(ticker)
 
     def _normalize_trade(self, data: Dict[str, Any], stream: Optional[str]) -> Trade | None:
         price = self._to_float(data.get("p"))
         size = self._to_float(data.get("q"))
-        ts = self._to_millis(data.get("E") or data.get("T"))
-        if price is None or size is None or ts is None:
+        ts_exchange = self._to_millis(data.get("E") or data.get("T"))
+        ts_event = self._now_ms()
+        if price is None or size is None:
             return None
         symbol = data.get("s") or (stream or "").split("@")[0].upper()
         normalized_symbol = normalize_symbol(self.exchange, symbol)
@@ -216,35 +270,68 @@ class BinanceConnector(ExchangeConnector):
             price=price,
             size=size,
             side=Side.SELL if data.get("m") else Side.BUY,
-            ts_event=ts,
-            ts_exchange=ts,
+            ts_event=ts_event,
+            ts_exchange=ts_exchange,
+            market_type=MarketType.SPOT,
             trade_id=str(data.get("t")) if data.get("t") is not None else None,
             raw=raw_payload,
         )
 
     def _normalize_orderbook(self, data: Dict[str, Any], stream: Optional[str]) -> OrderBook | None:
-        ts = self._to_millis(data.get("E"))
-        if ts is None:
-            return None
+        ts_exchange = self._to_millis(data.get("E"))
+        ts_event = self._now_ms()
         bids = self._parse_levels(data.get("b", []))
         asks = self._parse_levels(data.get("a", []))
-        if self._depth:
-            bids = bids[: self._depth]
-            asks = asks[: self._depth]
         symbol = data.get("s") or (stream or "").split("@")[0].upper()
         normalized_symbol = normalize_symbol(self.exchange, symbol)
+        seq = self._to_int(data.get("u"))
+        prev_seq = self._to_int(data.get("pu") or data.get("U"))
+        state = self._book_state(normalized_symbol)
+        update_type = BookUpdateType.DELTA
+        is_reset = False
+        if state.sequence is None:
+            state.snapshot(bids, asks, seq, prev_seq)
+            update_type = BookUpdateType.SNAPSHOT
+        else:
+            applied = state.apply_delta(bids, asks, seq, prev_seq)
+            if not applied:
+                state.snapshot(bids, asks, seq, prev_seq)
+                is_reset = True
+        bids_out, asks_out = state.top()
         raw_payload = {"channel": "depth", "stream": stream, "data": data} if self._raw_mode else None
         return OrderBook(
             exchange=self.exchange,
             symbol=normalized_symbol,
-            bids=bids,
-            asks=asks,
-            ts_event=ts,
-            ts_exchange=ts,
+            bids=bids_out,
+            asks=asks_out,
+            ts_event=ts_event,
+            ts_exchange=ts_exchange,
+            market_type=MarketType.SPOT,
             depth=self._depth,
-            update_type=BookUpdateType.SNAPSHOT if data.get("firstUpdateId") is not None else BookUpdateType.DELTA,
-            sequence=self._to_int(data.get("u")),
-            prev_sequence=self._to_int(data.get("pu") or data.get("U")),
+            update_type=update_type,
+            sequence=state.sequence,
+            prev_sequence=state.prev_sequence,
+            is_reset=is_reset,
+            raw=raw_payload,
+        )
+
+    def _normalize_ticker(self, data: Dict[str, Any], stream: Optional[str]) -> Ticker | None:
+        ts_exchange = self._to_millis(data.get("E"))
+        ts_event = self._now_ms()
+        symbol = data.get("s") or (stream or "").split("@")[0].upper()
+        normalized_symbol = normalize_symbol(self.exchange, symbol)
+        last = self._to_float(data.get("c"))
+        raw_payload = {"channel": "ticker", "stream": stream, "data": data} if self._raw_mode else None
+        return Ticker(
+            exchange=self.exchange,
+            symbol=normalized_symbol,
+            last=last,
+            mark=None,
+            index=None,
+            open_interest=None,
+            ts_event=ts_event,
+            ts_exchange=ts_exchange,
+            market_type=MarketType.SPOT,
             raw=raw_payload,
         )
 
@@ -259,6 +346,9 @@ class BinanceConnector(ExchangeConnector):
                 continue
             prices.append((price, size))
         return prices
+
+    def _book_state(self, symbol: str) -> _BookState:
+        return self._books.setdefault(symbol, _BookState(self._depth))
 
     @staticmethod
     def _to_float(value: Any) -> Optional[float]:

@@ -20,6 +20,8 @@ PriceSize = Tuple[Price, Size]
 class EventType(str, Enum):
     TRADE = "trade"
     ORDERBOOK = "orderbook"
+    TICKER = "ticker"
+    FUNDING = "funding"
     HEARTBEAT = "heartbeat"
     RAW = "raw"
     SYSTEM = "system"
@@ -34,6 +36,13 @@ class Side(str, Enum):
 class BookUpdateType(str, Enum):
     SNAPSHOT = "snapshot"
     DELTA = "delta"
+
+
+class MarketType(str, Enum):
+    SPOT = "spot"
+    PERP = "perp"
+    FUTURE = "future"
+    OPTION = "option"
 
 
 # ---------------------------------------------------------------------
@@ -53,11 +62,12 @@ class BaseEvent:
     type: EventType
     exchange: str
     symbol: str
-    ts_internal: Optional[int] = None  # monotonic ns since start of process
-    seq_internal: Optional[int] = None  # monotonic counter assigned by broker
     ts_event: Millis
     ts_exchange: Optional[Millis] = None
+    market_type: Optional[MarketType | str] = None
     raw: Optional[Dict[str, Any]] = None
+    ts_internal: Optional[int] = None  # monotonic ns since start of process
+    seq_internal: Optional[int] = None  # monotonic counter assigned by broker
 
     def to_wire(self) -> Dict[str, Any]:
         d = asdict(self)
@@ -131,6 +141,29 @@ class OrderBook(BaseEvent):
         if not self.bids or not self.asks:
             return None
         return self.asks[0][0] - self.bids[0][0]
+
+
+# ---------------------------------------------------------------------
+# Ticker & Funding schemas
+# ---------------------------------------------------------------------
+
+
+@dataclass(slots=True, kw_only=True)
+class Ticker(BaseEvent):
+    type: EventType = field(init=False, default=EventType.TICKER)
+    last: Optional[Price] = None
+    mark: Optional[Price] = None
+    index: Optional[Price] = None
+    open_interest: Optional[float] = None
+
+
+@dataclass(slots=True, kw_only=True)
+class FundingUpdate(BaseEvent):
+    type: EventType = field(init=False, default=EventType.FUNDING)
+    rate: Optional[float] = None
+    next_time: Optional[Millis] = None
+    mark: Optional[Price] = None
+    index: Optional[Price] = None
 
 
 # ---------------------------------------------------------------------

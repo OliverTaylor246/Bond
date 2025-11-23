@@ -14,8 +14,10 @@ from .base import ConnectorError, ExchangeConnector
 from ..schemas import (
     BaseEvent,
     BookUpdateType,
+    MarketType,
     OrderBook,
     PriceSize,
+    Ticker,
     Trade,
     normalize_symbol,
     unify_side,
@@ -24,10 +26,54 @@ from ..schemas import (
 logger = logging.getLogger(__name__)
 
 
+class _BookState:
+    def __init__(self, depth: Optional[int]):
+        self.depth = depth
+        self.bids: Dict[float, float] = {}
+        self.asks: Dict[float, float] = {}
+        self.sequence: Optional[int] = None
+        self.prev_sequence: Optional[int] = None
+        self.is_reset: bool = False
+
+    def _apply_side(self, side: str, levels: List[PriceSize]) -> None:
+        book = self.bids if side == "bids" else self.asks
+        for price, size in levels:
+            if size == 0:
+                book.pop(price, None)
+            else:
+                book[price] = size
+
+    def snapshot(self, bids: List[PriceSize], asks: List[PriceSize], sequence: Optional[int], prev_seq: Optional[int]) -> None:
+        self.bids = {p: s for p, s in bids}
+        self.asks = {p: s for p, s in asks}
+        self.sequence = sequence
+        self.prev_sequence = prev_seq
+        self.is_reset = False
+
+    def apply_delta(self, bids: List[PriceSize], asks: List[PriceSize], sequence: Optional[int], prev_seq: Optional[int]) -> bool:
+        if self.sequence is not None and prev_seq is not None and self.sequence != prev_seq:
+            return False
+        self._apply_side("bids", bids)
+        self._apply_side("asks", asks)
+        self.prev_sequence = prev_seq
+        self.sequence = sequence
+        self.is_reset = False
+        return True
+
+    def top(self) -> tuple[List[PriceSize], List[PriceSize]]:
+        bid_list = sorted(self.bids.items(), key=lambda kv: kv[0], reverse=True)
+        ask_list = sorted(self.asks.items(), key=lambda kv: kv[0])
+        depth = self.depth
+        if depth:
+            bid_list = bid_list[:depth]
+            ask_list = ask_list[:depth]
+        return bid_list, ask_list
+
+
 class BybitConnector(ExchangeConnector):
     exchange = "bybit"
     _WS_URL = "wss://stream.bybit.com/v5/public/spot"
-    _CHANNEL_MAP = {"trades": "publicTrade", "orderbook": "orderBookL2_25"}
+    _CHANNEL_MAP = {"trades": "publicTrade", "orderbook": "orderBookL2_25", "ticker": "tickers"}
     _PING_INTERVAL_SEC = 20
     _INITIAL_BACKOFF_SEC = 1.0
     _MAX_BACKOFF_SEC = 30.0
@@ -47,6 +93,7 @@ class BybitConnector(ExchangeConnector):
         self._ws: Optional[websockets.WebSocketClientProtocol] = None
         self._run_task: Optional[asyncio.Task[None]] = None
         self._ping_task: Optional[asyncio.Task[None]] = None
+        self._books: Dict[str, "_BookState"] = {}
 
     async def connect(self) -> None:
         if self._run_task and not self._run_task.done():
@@ -196,12 +243,20 @@ class BybitConnector(ExchangeConnector):
             book = self._normalize_orderbook(payload)
             if book:
                 await self._event_queue.put(book)
+        elif topic.startswith("tickers"):
+            data = payload.get("data")
+            if isinstance(data, list):
+                for entry in data:
+                    ticker = self._normalize_ticker(entry, payload)
+                    if ticker:
+                        await self._event_queue.put(ticker)
 
     def _normalize_trade(self, data: Dict[str, Any], payload: Dict[str, Any]) -> Trade | None:
         price = self._to_float(data.get("price"))
         size = self._to_float(data.get("size") or data.get("qty"))
-        ts = self._to_millis(data.get("trade_time_ms") or payload.get("ts"))
-        if price is None or size is None or ts is None:
+        ts_exchange = self._to_millis(data.get("trade_time_ms") or payload.get("ts"))
+        ts_event = self._now_ms()
+        if price is None or size is None:
             return None
         symbol = data.get("symbol") or payload.get("topic", "").split(".", 1)[-1]
         normalized_symbol = normalize_symbol(self.exchange, symbol)
@@ -213,8 +268,9 @@ class BybitConnector(ExchangeConnector):
             price=price,
             size=size,
             side=side,
-            ts_event=ts,
-            ts_exchange=ts,
+            ts_event=ts_event,
+            ts_exchange=ts_exchange,
+            market_type=MarketType.SPOT,
             trade_id=str(data.get("trade_id") or data.get("id")) if data.get("trade_id") or data.get("id") else None,
             raw=raw_payload,
         )
@@ -225,7 +281,8 @@ class BybitConnector(ExchangeConnector):
             return None
         symbol = payload.get("topic", "").split(".", 1)[-1]
         normalized_symbol = normalize_symbol(self.exchange, symbol)
-        ts = self._to_millis(payload.get("ts"))
+        ts_exchange = self._to_millis(payload.get("ts"))
+        ts_event = self._now_ms()
         levels = payload.get("data", [])
         bids: List[PriceSize] = []
         asks: List[PriceSize] = []
@@ -247,19 +304,59 @@ class BybitConnector(ExchangeConnector):
             asks = asks[:depth]
         book_type = payload.get("type") or payload.get("event")
         raw_payload = {"channel": "orderbook", "payload": payload} if self._raw_mode else None
+        seq = self._to_int(payload.get("seqNum"))
+        prev_seq = self._to_int(payload.get("prevSeqNum"))
+        state = self._book_state(normalized_symbol)
+        is_reset = False
+        update_type = BookUpdateType.SNAPSHOT if book_type == "snapshot" else BookUpdateType.DELTA
+        if state.sequence is None or update_type == BookUpdateType.SNAPSHOT:
+            state.snapshot(bids, asks, seq, prev_seq)
+            update_type = BookUpdateType.SNAPSHOT
+        else:
+            applied = state.apply_delta(bids, asks, seq, prev_seq)
+            if not applied:
+                state.snapshot(bids, asks, seq, prev_seq)
+                update_type = BookUpdateType.SNAPSHOT
+                is_reset = True
+        bids_out, asks_out = state.top()
         return OrderBook(
             exchange=self.exchange,
             symbol=normalized_symbol,
-            bids=bids,
-            asks=asks,
-            ts_event=ts or self._now_ms(),
-            ts_exchange=ts or self._now_ms(),
+            bids=bids_out,
+            asks=asks_out,
+            ts_event=ts_event,
+            ts_exchange=ts_exchange,
+            market_type=MarketType.SPOT,
             depth=depth,
-            sequence=self._to_int(payload.get("seqNum")),
-            prev_sequence=self._to_int(payload.get("prevSeqNum")),
-            update_type=BookUpdateType.SNAPSHOT if book_type == "snapshot" else BookUpdateType.DELTA,
+            sequence=state.sequence,
+            prev_sequence=state.prev_sequence,
+            update_type=update_type,
+            is_reset=is_reset,
             raw=raw_payload,
         )
+
+    def _normalize_ticker(self, entry: Dict[str, Any], payload: Dict[str, Any]) -> Ticker | None:
+        ts_exchange = self._to_millis(payload.get("ts") or entry.get("ts"))
+        ts_event = self._now_ms()
+        symbol = entry.get("symbol") or payload.get("topic", "").split(".", 1)[-1]
+        normalized_symbol = normalize_symbol(self.exchange, symbol)
+        last = self._to_float(entry.get("lastPrice") or entry.get("lp") or entry.get("price24hPcnt"))
+        raw_payload = {"channel": "tickers", "payload": payload} if self._raw_mode else None
+        return Ticker(
+            exchange=self.exchange,
+            symbol=normalized_symbol,
+            last=last,
+            mark=None,
+            index=None,
+            open_interest=self._to_float(entry.get("openInterest")),
+            ts_event=ts_event,
+            ts_exchange=ts_exchange,
+            market_type=MarketType.SPOT,
+            raw=raw_payload,
+        )
+
+    def _book_state(self, symbol: str) -> _BookState:
+        return self._books.setdefault(symbol, _BookState(self._depth))
 
     @staticmethod
     def _now_ms() -> int:

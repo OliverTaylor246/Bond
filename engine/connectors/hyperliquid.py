@@ -14,13 +14,14 @@ from .base import ConnectorError, ExchangeConnector
 from ..schemas import (
     BaseEvent,
     BookUpdateType,
+    MarketType,
     OrderBook,
     PriceSize,
+    Ticker,
     Side,
     Trade,
     normalize_symbol,
 )
-from ..orderbook import LocalOrderBook
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +53,6 @@ class HyperliquidConnector(ExchangeConnector):
         self._event_queue: asyncio.Queue[BaseEvent] = asyncio.Queue()
         self._run_task: Optional[asyncio.Task[None]] = None
         self._ping_task: Optional[asyncio.Task[None]] = None
-        self._books: Dict[str, LocalOrderBook] = {}
 
     async def connect(self) -> None:
         if self._run_task and not self._run_task.done():
@@ -232,9 +232,15 @@ class HyperliquidConnector(ExchangeConnector):
         elif channel == "l2Book":
             data = payload.get("data")
             if isinstance(data, dict):
-                events = self._normalize_orderbook(data)
-                for event in events:
+                event = self._normalize_orderbook(data)
+                if event:
                     await self._event_queue.put(event)
+        elif channel == "ticker":
+            data = payload.get("data")
+            if isinstance(data, dict):
+                ticker = self._normalize_ticker(data)
+                if ticker:
+                    await self._event_queue.put(ticker)
 
     def _normalize_trade(self, data: Dict[str, Any]) -> Trade | None:
         coin = data.get("coin")
@@ -242,8 +248,9 @@ class HyperliquidConnector(ExchangeConnector):
             return None
         price = self._to_float(data.get("px"))
         size = self._to_float(data.get("sz"))
-        ts = self._to_millis(data.get("time"))
-        if price is None or size is None or ts is None:
+        ts_exchange = self._to_millis(data.get("time"))
+        ts_event = self._now_ms()
+        if price is None or size is None:
             return None
         side = self._side_from_payload(data.get("side"))
         normalized_symbol = self._pair_symbol(data.get("symbol") or coin, coin)
@@ -254,20 +261,20 @@ class HyperliquidConnector(ExchangeConnector):
             price=price,
             size=size,
             side=side,
-            ts_event=ts,
-            ts_exchange=ts,
+            ts_event=ts_event,
+            ts_exchange=ts_exchange,
+            market_type=MarketType.PERP,
             trade_id=str(data.get("tid")) if data.get("tid") is not None else None,
             match_id=data.get("hash"),
             raw=raw_payload,
         )
 
-    def _normalize_orderbook(self, data: Dict[str, Any]) -> List[OrderBook]:
+    def _normalize_orderbook(self, data: Dict[str, Any]) -> OrderBook | None:
         coin = data.get("coin")
         if not coin:
-            return []
-        ts = self._to_millis(data.get("time"))
-        if ts is None:
-            return []
+            return None
+        ts_exchange = self._to_millis(data.get("time"))
+        ts_event = self._now_ms()
         levels = data.get("levels") or [[], []]
         bids = self._parse_levels(levels[0] if len(levels) > 0 else [], reverse=True)
         asks = self._parse_levels(levels[1] if len(levels) > 1 else [], reverse=False)
@@ -276,24 +283,40 @@ class HyperliquidConnector(ExchangeConnector):
             asks = asks[: self._depth]
         normalized_symbol = self._pair_symbol(data.get("symbol") or coin, coin)
 
-        book = self._books.setdefault(normalized_symbol, LocalOrderBook(depth=self._depth))
-        book.snapshot("bids", bids)
-        book.snapshot("asks", asks)
-        bids_out, asks_out = book.top()
-
         raw_payload = {"channel": "l2Book", "data": data} if self._raw_mode else None
-        ob = OrderBook(
+        return OrderBook(
             exchange=self.exchange,
             symbol=normalized_symbol,
-            bids=bids_out,
-            asks=asks_out,
-            ts_event=ts,
-            ts_exchange=ts,
+            bids=bids,
+            asks=asks,
+            ts_event=ts_event,
+            ts_exchange=ts_exchange,
+            market_type=MarketType.PERP,
             depth=self._depth,
             update_type=BookUpdateType.SNAPSHOT,
             raw=raw_payload,
         )
-        return [ob]
+
+    def _normalize_ticker(self, data: Dict[str, Any]) -> Ticker | None:
+        coin = data.get("coin")
+        if not coin:
+            return None
+        ts_exchange = self._to_millis(data.get("time"))
+        ts_event = self._now_ms()
+        normalized_symbol = self._pair_symbol(data.get("symbol") or coin, coin)
+        raw_payload = {"channel": "ticker", "data": data} if self._raw_mode else None
+        return Ticker(
+            exchange=self.exchange,
+            symbol=normalized_symbol,
+            last=self._to_float(data.get("lastPx") or data.get("last") or data.get("prevMarkPx")),
+            mark=self._to_float(data.get("markPx")),
+            index=self._to_float(data.get("indexPx")),
+            open_interest=self._to_float(data.get("openInterest")),
+            ts_event=ts_event,
+            ts_exchange=ts_exchange,
+            market_type=MarketType.PERP,
+            raw=raw_payload,
+        )
 
     def _parse_levels(
         self, levels: Iterable[Dict[str, Any]], *, reverse: bool

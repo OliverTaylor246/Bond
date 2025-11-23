@@ -14,8 +14,11 @@ from .base import ConnectorError, ExchangeConnector
 from ..schemas import (
     BaseEvent,
     BookUpdateType,
+    MarketType,
     OrderBook,
     PriceSize,
+    FundingUpdate,
+    Ticker,
     Side,
     Trade,
     normalize_symbol,
@@ -23,6 +26,50 @@ from ..schemas import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+class _BookState:
+    def __init__(self, depth: int):
+        self.depth = depth
+        self.bids: Dict[float, float] = {}
+        self.asks: Dict[float, float] = {}
+        self.sequence: Optional[int] = None
+        self.prev_sequence: Optional[int] = None
+        self.is_reset: bool = False
+
+    def _apply_side(self, side: str, levels: List[PriceSize]) -> None:
+        book = self.bids if side == "bids" else self.asks
+        for price, size in levels:
+            if size == 0:
+                book.pop(price, None)
+            else:
+                book[price] = size
+
+    def snapshot(self, bids: List[PriceSize], asks: List[PriceSize], sequence: Optional[int], prev_seq: Optional[int]) -> None:
+        self.bids = {p: s for p, s in bids}
+        self.asks = {p: s for p, s in asks}
+        self.sequence = sequence
+        self.prev_sequence = prev_seq
+        self.is_reset = False
+
+    def apply_delta(self, bids: List[PriceSize], asks: List[PriceSize], sequence: Optional[int], prev_seq: Optional[int]) -> bool:
+        if self.sequence is not None and prev_seq is not None and self.sequence != prev_seq:
+            return False
+        self._apply_side("bids", bids)
+        self._apply_side("asks", asks)
+        self.prev_sequence = prev_seq
+        self.sequence = sequence
+        self.is_reset = False
+        return True
+
+    def top(self) -> tuple[List[PriceSize], List[PriceSize]]:
+        bid_list = sorted(self.bids.items(), key=lambda kv: kv[0], reverse=True)
+        ask_list = sorted(self.asks.items(), key=lambda kv: kv[0])
+        depth = self.depth
+        if depth:
+            bid_list = bid_list[:depth]
+            ask_list = ask_list[:depth]
+        return bid_list, ask_list
 
 
 class OkxConnector(ExchangeConnector):
@@ -34,6 +81,8 @@ class OkxConnector(ExchangeConnector):
     _CHANNEL_MAP = {
         "trades": "trades",
         "orderbook": "books-l2-tbt",
+        "ticker": "tickers",
+        "funding": "funding-rate",
     }
 
     def __init__(self) -> None:
@@ -51,6 +100,7 @@ class OkxConnector(ExchangeConnector):
         self._ws: Optional[websockets.WebSocketClientProtocol] = None
         self._run_task: Optional[asyncio.Task[None]] = None
         self._ping_task: Optional[asyncio.Task[None]] = None
+        self._books: Dict[str, _BookState] = {}
 
     async def connect(self) -> None:
         if self._run_task and not self._run_task.done():
@@ -97,7 +147,8 @@ class OkxConnector(ExchangeConnector):
             venue = normalized.replace("/", "-")
             for channel in channel_set:
                 channel_name = self._CHANNEL_MAP[channel]
-                args.add((channel_name, venue, depth_value))
+                size = depth_value if channel == "orderbook" else 0
+                args.add((channel_name, venue, size))
         async with self._subscription_lock:
             self._symbols = normalized_symbols
             self._channels = channel_set
@@ -174,11 +225,11 @@ class OkxConnector(ExchangeConnector):
             payload = {
                 "op": "subscribe",
                 "args": [
-                    {
+                    {k: v for k, v in {
                         "channel": channel,
                         "instId": inst,
-                        "sz": str(depth),
-                    }
+                        "sz": str(depth) if depth else None,
+                    }.items() if v is not None}
                     for channel, inst, depth in sorted(pending)
                 ],
             }
@@ -215,14 +266,24 @@ class OkxConnector(ExchangeConnector):
                 book = self._normalize_orderbook(entry, arg)
                 if book:
                     await self._event_queue.put(book)
+        elif channel == "tickers":
+            for entry in data:
+                ticker = self._normalize_ticker(entry, arg)
+                if ticker:
+                    await self._event_queue.put(ticker)
+        elif channel == "funding-rate":
+            for entry in data:
+                funding = self._normalize_funding(entry, arg)
+                if funding:
+                    await self._event_queue.put(funding)
 
     def _normalize_trade(self, entry: Dict[str, Any], arg: Dict[str, Any]) -> Trade | None:
         price = self._to_float(entry.get("px"))
         size = self._to_float(entry.get("sz"))
-        ts = self._to_millis(entry.get("ts"))
+        ts_exchange = self._to_millis(entry.get("ts"))
+        ts_event = self._now_ms()
         if price is None or size is None:
             return None
-        ts = ts or self._now_ms()
         symbol = entry.get("instId") or arg.get("instId") or ""
         normalized_symbol = normalize_symbol(self.exchange, symbol)
         side = unify_side(entry.get("side"))
@@ -233,8 +294,9 @@ class OkxConnector(ExchangeConnector):
             price=price,
             size=size,
             side=side,
-            ts_event=ts,
-            ts_exchange=ts,
+            ts_event=ts_event,
+            ts_exchange=ts_exchange,
+            market_type=self._infer_market_type(symbol),
             trade_id=str(entry.get("tradeId")) if entry.get("tradeId") is not None else None,
             raw=raw_payload,
         )
@@ -242,29 +304,43 @@ class OkxConnector(ExchangeConnector):
     def _normalize_orderbook(self, entry: Dict[str, Any], arg: Dict[str, Any]) -> OrderBook | None:
         symbol = arg.get("instId") or entry.get("instId") or ""
         normalized_symbol = normalize_symbol(self.exchange, symbol)
-        ts = self._to_millis(entry.get("ts")) or self._now_ms()
+        ts_exchange = self._to_millis(entry.get("ts"))
+        ts_event = self._now_ms()
         bids = self._parse_levels(entry.get("bids", []))
         asks = self._parse_levels(entry.get("asks", []))
-        if self._depth:
-            bids = bids[: self._depth]
-            asks = asks[: self._depth]
         update_type = (
             BookUpdateType.SNAPSHOT
             if entry.get("action") == "snapshot"
             else BookUpdateType.DELTA
         )
+        seq = self._to_int(entry.get("seqNum"))
+        prev_seq = self._to_int(entry.get("preSeqNum"))
+        state = self._book_state(normalized_symbol)
+        is_reset = False
+        if state.sequence is None or update_type == BookUpdateType.SNAPSHOT:
+            state.snapshot(bids, asks, seq, prev_seq)
+            update_type = BookUpdateType.SNAPSHOT
+        else:
+            applied = state.apply_delta(bids, asks, seq, prev_seq)
+            if not applied:
+                state.snapshot(bids, asks, seq, prev_seq)
+                update_type = BookUpdateType.SNAPSHOT
+                is_reset = True
+        bids_out, asks_out = state.top()
         raw_payload = {"channel": arg.get("channel"), "data": entry} if self._raw_mode else None
         return OrderBook(
             exchange=self.exchange,
             symbol=normalized_symbol,
-            bids=bids,
-            asks=asks,
-            ts_event=ts,
-            ts_exchange=ts,
+            bids=bids_out,
+            asks=asks_out,
+            ts_event=ts_event,
+            ts_exchange=ts_exchange,
+            market_type=self._infer_market_type(symbol),
             depth=self._depth,
-            sequence=self._to_int(entry.get("seqNum")),
-            prev_sequence=self._to_int(entry.get("preSeqNum")),
+            sequence=state.sequence,
+            prev_sequence=state.prev_sequence,
             update_type=update_type,
+            is_reset=is_reset,
             raw=raw_payload,
         )
 
@@ -279,6 +355,55 @@ class OkxConnector(ExchangeConnector):
                     continue
                 parsed.append((price, size))
         return parsed
+
+    def _normalize_ticker(self, entry: Dict[str, Any], arg: Dict[str, Any]) -> Ticker | None:
+        symbol = entry.get("instId") or arg.get("instId") or ""
+        normalized_symbol = normalize_symbol(self.exchange, symbol)
+        ts_exchange = self._to_millis(entry.get("ts"))
+        ts_event = self._now_ms()
+        last = self._to_float(entry.get("last"))
+        mark = self._to_float(entry.get("markPx"))
+        index = self._to_float(entry.get("idxPx"))
+        oi = self._to_float(entry.get("oi")) if entry.get("oi") is not None else None
+        raw_payload = {"channel": arg.get("channel"), "data": entry} if self._raw_mode else None
+        return Ticker(
+            exchange=self.exchange,
+            symbol=normalized_symbol,
+            last=last,
+            mark=mark,
+            index=index,
+            open_interest=oi,
+            ts_event=ts_event,
+            ts_exchange=ts_exchange,
+            market_type=self._infer_market_type(symbol),
+            raw=raw_payload,
+        )
+
+    def _normalize_funding(self, entry: Dict[str, Any], arg: Dict[str, Any]) -> FundingUpdate | None:
+        symbol = entry.get("instId") or arg.get("instId") or ""
+        normalized_symbol = normalize_symbol(self.exchange, symbol)
+        ts_exchange = self._to_millis(entry.get("ts"))
+        ts_event = self._now_ms()
+        rate = self._to_float(entry.get("fundingRate"))
+        next_time = self._to_millis(entry.get("nextFundingTime"))
+        mark = self._to_float(entry.get("markPx"))
+        index = self._to_float(entry.get("idxPx"))
+        raw_payload = {"channel": arg.get("channel"), "data": entry} if self._raw_mode else None
+        return FundingUpdate(
+            exchange=self.exchange,
+            symbol=normalized_symbol,
+            rate=rate,
+            next_time=next_time,
+            mark=mark,
+            index=index,
+            ts_event=ts_event,
+            ts_exchange=ts_exchange,
+            market_type=self._infer_market_type(symbol),
+            raw=raw_payload,
+        )
+
+    def _book_state(self, symbol: str) -> _BookState:
+        return self._books.setdefault(symbol, _BookState(self._depth))
 
     @staticmethod
     def _to_float(value: Any) -> Optional[float]:
@@ -315,6 +440,20 @@ class OkxConnector(ExchangeConnector):
     @staticmethod
     def _now_ms() -> int:
         return int(time.time() * 1000)
+
+    @staticmethod
+    def _infer_market_type(inst_id: str) -> MarketType | None:
+        if not inst_id:
+            return None
+        inst_id = inst_id.upper()
+        if inst_id.endswith("-SWAP") or inst_id.endswith("-PERP"):
+            return MarketType.PERP
+        parts = inst_id.split("-")
+        if len(parts) >= 3:
+            if len(parts) >= 4:
+                return MarketType.OPTION
+            return MarketType.FUTURE
+        return MarketType.SPOT
 
     async def handle_message(self, raw_message: str) -> None:
         await self._handle_message(raw_message)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import abc
+import time
 from typing import Any, AsyncIterator, Dict, Sequence, Set
 
 from ..schemas import BaseEvent, OrderBook, RawMessage, Trade, normalize_symbol, unify_side
@@ -12,7 +13,7 @@ class ConnectorError(Exception):
 
 class ExchangeConnector(abc.ABC):
     exchange: str
-    supported_channels: Set[str] = {"trades", "orderbook"}
+    supported_channels: Set[str] = {"trades", "orderbook", "ticker", "funding"}
 
     def __init__(self) -> None:
         self._subscriptions: Dict[str, Any] = {}
@@ -56,3 +57,7 @@ class ExchangeConnector(abc.ABC):
     def to_venue_symbol(self, normalized_symbol: str) -> str:
         base, quote = normalized_symbol.split("/")
         return f"{base}{quote}"
+
+    @staticmethod
+    def _now_ms() -> int:
+        return int(time.time() * 1000)

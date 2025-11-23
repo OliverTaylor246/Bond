@@ -12,6 +12,7 @@ from .base import ConnectorError, ExchangeConnector
 from ..schemas import (
     BaseEvent,
     BookUpdateType,
+    MarketType,
     OrderBook,
     PriceSize,
     Side,
@@ -184,8 +185,9 @@ class CCXTExchangeConnector(ExchangeConnector):
     def _normalize_trade(self, symbol: str, data: Dict[str, Any]) -> Trade | None:
         price = self._to_float(data.get("price") or data.get("px"))
         size = self._to_float(data.get("amount") or data.get("qty") or data.get("size"))
-        ts = self._to_millis(data.get("timestamp") or data.get("tradeTimestamp"))
-        if price is None or size is None or ts is None:
+        ts_exchange = self._to_millis(data.get("timestamp") or data.get("tradeTimestamp"))
+        ts_event = self._now_ms()
+        if price is None or size is None:
             return None
         normalized_symbol = normalize_symbol(self.exchange, symbol)
         side = unify_side(data.get("side") or data.get("direction"))
@@ -196,16 +198,16 @@ class CCXTExchangeConnector(ExchangeConnector):
             price=price,
             size=size,
             side=side,
-            ts_event=ts,
-            ts_exchange=ts,
+            ts_event=ts_event,
+            ts_exchange=ts_exchange,
+            market_type=self._market_type_enum(),
             trade_id=str(data.get("id") or data.get("tradeId")) if data.get("id") or data.get("tradeId") else None,
             raw=raw_payload,
         )
 
     def _normalize_orderbook(self, symbol: str, data: Dict[str, Any]) -> OrderBook | None:
-        ts = self._to_millis(data.get("timestamp") or data.get("datetime"))
-        if ts is None:
-            return None
+        ts_exchange = self._to_millis(data.get("timestamp") or data.get("datetime"))
+        ts_event = self._now_ms()
         bids = self._parse_levels(data.get("bids") or [])
         asks = self._parse_levels(data.get("asks") or [])
         if self._depth:
@@ -218,8 +220,9 @@ class CCXTExchangeConnector(ExchangeConnector):
             symbol=normalized_symbol,
             bids=bids,
             asks=asks,
-            ts_event=ts,
-            ts_exchange=ts,
+            ts_event=ts_event,
+            ts_exchange=ts_exchange,
+            market_type=self._market_type_enum(),
             depth=self._depth,
             update_type=BookUpdateType.SNAPSHOT,
             sequence=self._to_int(data.get("nonce") or data.get("sequence")),
@@ -259,6 +262,17 @@ class CCXTExchangeConnector(ExchangeConnector):
             return int(value)
         except (TypeError, ValueError):
             return None
+
+    def _market_type_enum(self) -> MarketType | None:
+        if not self._market_type:
+            return None
+        mapping = {
+            "spot": MarketType.SPOT,
+            "margin": MarketType.SPOT,
+            "swap": MarketType.PERP,
+            "future": MarketType.FUTURE,
+        }
+        return mapping.get(self._market_type, None)
 
     @staticmethod
     def _to_int(value: Any) -> Optional[int]:

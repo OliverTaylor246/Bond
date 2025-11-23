@@ -15,6 +15,7 @@ from .base import ConnectorError, ExchangeConnector
 from ..schemas import (
     BaseEvent,
     BookUpdateType,
+    MarketType,
     OrderBook,
     PriceSize,
     Side,
@@ -22,7 +23,6 @@ from ..schemas import (
     normalize_symbol,
     unify_side,
 )
-from ..orderbook import LocalOrderBook
 
 logger = logging.getLogger(__name__)
 
@@ -54,10 +54,7 @@ class LighterConnector(ExchangeConnector):
         self._http_session: Optional[aiohttp.ClientSession] = None
         self._symbol_lookup: Dict[str, int] = {}
         self._market_map: Dict[int, str] = {}
-        self._book_initialized: Set[int] = set()
-        self._last_offset: Dict[int, int] = {}
         self._current_subscriptions: Set[str] = set()
-        self._books: Dict[int, LocalOrderBook] = {}
 
     async def connect(self) -> None:
         if self._run_task and not self._run_task.done():
@@ -222,8 +219,8 @@ class LighterConnector(ExchangeConnector):
         elif channel.startswith("order_book:"):
             book_payload = payload.get("order_book")
             if book_payload:
-                books = self._normalize_orderbook(book_payload, market_id)
-                for book in books:
+                book = self._normalize_orderbook(book_payload, market_id)
+                if book:
                     await self._event_queue.put(book)
 
     def _normalize_trade(self, entry: Dict[str, Any], market_id: int) -> Trade | None:
@@ -232,7 +229,8 @@ class LighterConnector(ExchangeConnector):
         timestamp = self._to_millis(entry.get("timestamp"))
         if price is None or size is None:
             return None
-        ts = timestamp or self._now_ms()
+        ts_exchange = timestamp
+        ts_event = self._now_ms()
         symbol = self._market_map.get(market_id) or str(market_id)
         normalized_symbol = self._resolve_symbol(symbol)
         side = unify_side(entry.get("side"))
@@ -243,24 +241,45 @@ class LighterConnector(ExchangeConnector):
             price=price,
             size=size,
             side=side,
-            ts_event=ts,
-            ts_exchange=ts,
+            ts_event=ts_event,
+            ts_exchange=ts_exchange,
+            market_type=MarketType.PERP,
             trade_id=str(entry.get("trade_id")) if entry.get("trade_id") is not None else None,
             raw=raw_payload,
         )
 
-    def _normalize_orderbook(self, book: Dict[str, Any], market_id: int) -> List[OrderBook]:
+    def _normalize_orderbook(self, book: Dict[str, Any], market_id: int) -> OrderBook | None:
         symbol = self._market_map.get(market_id) or str(market_id)
         normalized_symbol = self._resolve_symbol(symbol)
         asks = self._parse_levels(book.get("asks", []))
         bids = self._parse_levels(book.get("bids", []))
-        ts = self._now_ms()
-        offset = self._to_int(book.get("offset"))
-        prev_sequence = self._last_offset.get(market_id)
-        if offset is not None:
-            self._last_offset[market_id] = offset
-\n+        lob = self._books.setdefault(market_id, LocalOrderBook(depth=self._depth))\n+        # Lighter messages are snapshots; apply as reset and emit one snapshot\n+        lob.snapshot(\"bids\", bids)\n+        lob.snapshot(\"asks\", asks)\n+        bids_out, asks_out = lob.top()\n+        raw_payload = {\"channel\": \"order_book\", \"market_id\": market_id, \"data\": book} if self._raw_mode else None\n+        ob = OrderBook(\n+            exchange=self.exchange,\n+            symbol=normalized_symbol,\n+            bids=bids_out,\n+            asks=asks_out,\n+            ts_event=ts,\n+            ts_exchange=ts,\n+            depth=self._depth,\n+            sequence=offset,\n+            prev_sequence=prev_sequence,\n+            update_type=BookUpdateType.SNAPSHOT,\n+            raw=raw_payload,\n+        )\n+        return [ob]\n*** End Patch
-
+        if self._depth:
+            bids = bids[: self._depth]
+            asks = asks[: self._depth]
+        ts_exchange = self._to_millis(book.get("ts"))
+        ts_event = self._now_ms()
+        sequence = self._to_int(book.get("offset"))
+        prev_sequence = self._to_int(
+            book.get("prev_offset") or book.get("prevOffset") or book.get("pre_offset")
+        )
+        update_type = BookUpdateType.SNAPSHOT
+        raw_payload = (
+            {"channel": "order_book", "market_id": market_id, "data": book} if self._raw_mode else None
+        )
+        return OrderBook(
+            exchange=self.exchange,
+            symbol=normalized_symbol,
+            bids=bids,
+            asks=asks,
+            ts_event=ts_event,
+            ts_exchange=ts_exchange,
+            market_type=MarketType.PERP,
+            depth=self._depth,
+            sequence=sequence,
+            prev_sequence=prev_sequence,
+            update_type=update_type,
+            raw=raw_payload,
+        )
     @staticmethod
     def _parse_levels(levels: Iterable[Any]) -> List[PriceSize]:
         parsed: List[PriceSize] = []
