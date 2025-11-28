@@ -695,3 +695,143 @@ class StreamRuntime:
 
 
 __all__ = ["StreamRuntime"]
+
+# -------------------------------
+# New native runtime (StreamConfig + exchange connectors)
+# -------------------------------
+
+import asyncio as _asyncio
+import json as _json
+import time as _time
+from contextlib import suppress as _suppress
+from typing import AsyncIterator as _AsyncIterator
+
+from engine.schemas import StreamConfig as _StreamConfig
+from engine.dispatch import RedisDispatcher as _RedisDispatcher
+from engine.pipeline_native import run_native_pipeline as _run_native_pipeline
+from apps.runtime.exchange_registry import get_exchange_connector as _get_exchange_connector
+
+
+class NativeStreamRuntime:
+  """
+  StreamRuntime aligned to the canonical StreamConfig:
+    - validates config against venue capabilities
+    - selects the registered exchange connector
+    - runs native pipeline (batch + Redis)
+    - maintains heartbeat/TTL metadata in Redis
+  """
+
+  def __init__(self, redis_url: str = "redis://localhost:6379"):
+    self.redis_url = redis_url
+    self.dispatcher = _RedisDispatcher(redis_url)
+    self.active_streams: dict[str, _asyncio.Task] = {}
+    self.heartbeat_tasks: dict[str, _asyncio.Task] = {}
+    self.default_ttl = 600
+
+  async def start(self) -> None:
+    await self.dispatcher.connect()
+
+  async def stop(self) -> None:
+    for task in self.active_streams.values():
+      task.cancel()
+    await _asyncio.gather(*self.active_streams.values(), return_exceptions=True)
+    self.active_streams.clear()
+    for hb in self.heartbeat_tasks.values():
+      hb.cancel()
+    await _asyncio.gather(*self.heartbeat_tasks.values(), return_exceptions=True)
+    self.heartbeat_tasks.clear()
+    await self.dispatcher.disconnect()
+
+  async def launch_stream(self, config: _StreamConfig) -> None:
+    config = config.validate_against_capabilities()
+    if config.stream_id in self.active_streams:
+      raise ValueError(f"Stream {config.stream_id} already running")
+
+    connector = _get_exchange_connector(config.exchange)
+    await self._register_metadata(config)
+
+    task = _asyncio.create_task(self._run_stream(config, connector.stream_exchange))
+    self.active_streams[config.stream_id] = task
+
+    hb_task = _asyncio.create_task(self._heartbeat_loop(config))
+    self.heartbeat_tasks[config.stream_id] = hb_task
+
+  async def stop_stream(self, stream_id: str) -> None:
+    task = self.active_streams.pop(stream_id, None)
+    if task:
+      task.cancel()
+      with _suppress(_asyncio.CancelledError):
+        await task
+    hb = self.heartbeat_tasks.pop(stream_id, None)
+    if hb:
+      hb.cancel()
+    await self._deregister_metadata(stream_id)
+
+  async def _run_stream(self, config: _StreamConfig, stream_fn) -> None:
+    try:
+      events: _AsyncIterator[dict] = stream_fn(config)
+      await _run_native_pipeline(
+        config.stream_id,
+        events,
+        self.dispatcher,
+        config.flush_interval_ms,
+      )
+    except _asyncio.CancelledError:
+      raise
+    except Exception as exc:
+      print(f"[runtime-v2] Stream {config.stream_id} error: {exc}", flush=True)
+      raise
+    finally:
+      self.active_streams.pop(config.stream_id, None)
+
+  async def _register_metadata(self, config: _StreamConfig) -> None:
+    client = self.dispatcher.client
+    if not client:
+      return
+    ttl = max(config.ttl, int(config.heartbeat_ms / 1000) * 2, self.default_ttl)
+    config_key = f"stream:{config.stream_id}:config"
+    heartbeat_key = f"stream:{config.stream_id}:last_heartbeat"
+    plan = {
+      "type": "exchange_stream",
+      "exchange": config.exchange,
+      "channels": _json.loads(config.channels.model_dump_json()),
+      "symbols": config.symbols,
+      "pipeline_params": {
+        "flush_interval_ms": config.flush_interval_ms,
+        "heartbeat_ms": config.heartbeat_ms,
+      },
+    }
+    await client.sadd("active_streams", config.stream_id)
+    await client.set(config_key, config.model_dump_json(), ex=ttl)
+    await client.set(heartbeat_key, str(_time.time()), ex=ttl)
+    await client.set(f"stream:{config.stream_id}:plan", _json.dumps(plan), ex=ttl)
+
+  async def _deregister_metadata(self, stream_id: str) -> None:
+    client = self.dispatcher.client
+    if not client:
+      return
+    await client.srem("active_streams", stream_id)
+    await client.delete(
+      f"stream:{stream_id}",
+      f"stream:{stream_id}:config",
+      f"stream:{stream_id}:plan",
+      f"stream:{stream_id}:last_heartbeat",
+      f"stream:{stream_id}:token",
+    )
+
+  async def _heartbeat_loop(self, config: _StreamConfig) -> None:
+    client = self.dispatcher.client
+    if not client:
+      return
+    key = f"stream:{config.stream_id}:last_heartbeat"
+    ttl = max(config.ttl, int(config.heartbeat_ms / 1000) * 2, self.default_ttl)
+    try:
+      while True:
+        now = _time.time()
+        await client.set(key, str(now), ex=ttl)
+        await _asyncio.sleep(max(config.heartbeat_ms, 500) / 1000.0)
+    except _asyncio.CancelledError:
+      pass
+
+
+__all__.append("NativeStreamRuntime")

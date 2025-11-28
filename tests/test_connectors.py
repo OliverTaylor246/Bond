@@ -70,6 +70,39 @@ def test_binance_orderbook_snapshot_and_delta():
     assert delta.depth == connector._depth
 
 
+def test_binance_build_params_with_custom_speed_and_price_alias():
+    connector = BinanceConnector()
+    params = connector._build_params(
+        symbols=["BTC/USDT"],
+        channels={"orderbook", "price", "trades", "funding"},
+        depth=10,
+        speed_ms=250,
+    )
+    assert "btcusdt@depth10@250ms" in params
+    assert "btcusdt@ticker" in params  # price alias maps to ticker
+    assert "btcusdt@trade" in params
+    assert "btcusdt@markPrice@1s" in params
+
+
+def test_binance_funding_includes_index_price():
+    connector = BinanceConnector()
+    payload = {
+        "E": 1_700_000_000_000,
+        "s": "ETHUSDT",
+        "r": "0.0001",
+        "T": 1_700_000_100_000,
+        "p": "3000.5",
+        "i": "2999.9",
+    }
+    funding = connector._normalize_funding(payload, "ethusdt@markPrice@1s")
+
+    assert funding.exchange == "binance"
+    assert funding.symbol == "ETH/USDT"
+    assert funding.mark == 3000.5
+    assert funding.index == 2999.9
+    assert funding.rate == 0.0001
+
+
 def test_bybit_trade_and_orderbook_normalization():
     connector = BybitConnector()
     trade_payload = {

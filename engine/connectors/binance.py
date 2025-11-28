@@ -17,6 +17,7 @@ from ..schemas import (
     MarketType,
     OrderBook,
     PriceSize,
+    FundingUpdate,
     Side,
     Ticker,
     Trade,
@@ -72,10 +73,12 @@ class _BookState:
 
 class BinanceConnector(ExchangeConnector):
     exchange = "binance"
+    supported_channels = {"trades", "orderbook", "ticker", "funding", "price"}
     _WS_URL = "wss://stream.binance.com:9443/stream"
     _PING_INTERVAL_SEC = 20
     _INITIAL_BACKOFF_SEC = 1.0
     _MAX_BACKOFF_SEC = 30.0
+    _DEFAULT_BOOK_SPEED_MS = 100
 
     def __init__(self):
         super().__init__()
@@ -83,6 +86,7 @@ class BinanceConnector(ExchangeConnector):
         self._symbols: List[str] = []
         self._channels: Set[str] = set()
         self._depth: int = 20
+        self._book_speed_ms: int = self._DEFAULT_BOOK_SPEED_MS
         self._raw_mode = False
         self._params: Set[str] = set()
         self._current_params: Set[str] = set()
@@ -116,6 +120,7 @@ class BinanceConnector(ExchangeConnector):
         channels: Sequence[str],
         depth: int | None = None,
         raw: bool = False,
+        speed_ms: int | None = None,
     ) -> None:
         normalized_symbols: List[str] = []
         missing: List[str] = []
@@ -129,29 +134,30 @@ class BinanceConnector(ExchangeConnector):
             raise ConnectorError(f"Binance cannot resolve symbols: {', '.join(missing)}")
         channel_set: Set[str] = set()
         for channel in channels:
-            lowered = str(channel).strip().lower()
+            lowered = self._normalize_channel_name(channel)
             if lowered not in self.supported_channels:
                 raise ConnectorError(f"Channel '{channel}' is not supported by Binance")
             channel_set.add(lowered)
         if not channel_set:
             raise ConnectorError("Binance requires at least one channel to subscribe to")
         depth = depth or self._depth
+        book_speed_ms = speed_ms if speed_ms is not None else self._book_speed_ms
+        if not book_speed_ms or book_speed_ms <= 0:
+            book_speed_ms = self._DEFAULT_BOOK_SPEED_MS
         resolved = list(dict.fromkeys(normalized_symbols)) or []
         if not resolved:
             raise ConnectorError("Binance requires at least one symbol to subscribe to")
-        params: Set[str] = set()
-        for normalized in resolved:
-            venue = self.to_venue_symbol(normalized).lower()
-            if "trades" in channel_set:
-                params.add(f"{venue}@trade")
-            if "orderbook" in channel_set:
-                params.add(f"{venue}@depth{depth}@100ms")
-            if "ticker" in channel_set:
-                params.add(f"{venue}@ticker")
+        params = self._build_params(
+            symbols=resolved,
+            channels=channel_set,
+            depth=depth,
+            speed_ms=book_speed_ms,
+        )
         async with self._subscription_lock:
             self._symbols = resolved
             self._channels = channel_set
             self._depth = depth
+            self._book_speed_ms = book_speed_ms
             self._raw_mode = bool(raw)
             self._params = params
         await self._maybe_send_subscribe()
@@ -253,6 +259,35 @@ class BinanceConnector(ExchangeConnector):
             ticker = self._normalize_ticker(data, payload.get("stream"))
             if ticker:
                 await self._event_queue.put(ticker)
+        elif event_type == "markPriceUpdate":
+            funding = self._normalize_funding(data, payload.get("stream"))
+            if funding:
+                await self._event_queue.put(funding)
+            # also emit ticker-like mark info for consumers
+            ticker = self._normalize_mark_ticker(data, payload.get("stream"))
+            if ticker:
+                await self._event_queue.put(ticker)
+
+    def _normalize_channel_name(self, channel: Any) -> str:
+        lowered = str(channel).strip().lower()
+        if lowered in {"price", "prices"}:
+            return "ticker"
+        return lowered
+
+    def _build_params(self, *, symbols: Sequence[str], channels: Set[str], depth: int, speed_ms: int) -> Set[str]:
+        params: Set[str] = set()
+        normalized_channels = {self._normalize_channel_name(ch) for ch in channels}
+        for normalized in symbols:
+            venue = self.to_venue_symbol(normalized).lower()
+            if "trades" in normalized_channels:
+                params.add(f"{venue}@trade")
+            if "orderbook" in normalized_channels:
+                params.add(f"{venue}@depth{depth}@{speed_ms}ms")
+            if "ticker" in normalized_channels:
+                params.add(f"{venue}@ticker")
+            if "funding" in normalized_channels:
+                params.add(f"{venue}@markPrice@1s")
+        return params
 
     def _normalize_trade(self, data: Dict[str, Any], stream: Optional[str]) -> Trade | None:
         price = self._to_float(data.get("p"))
@@ -335,6 +370,49 @@ class BinanceConnector(ExchangeConnector):
             raw=raw_payload,
         )
 
+    def _normalize_mark_ticker(self, data: Dict[str, Any], stream: Optional[str]) -> Ticker | None:
+        ts_exchange = self._to_millis(data.get("E"))
+        ts_event = self._now_ms()
+        symbol = data.get("s") or (stream or "").split("@")[0].upper()
+        normalized_symbol = normalize_symbol(self.exchange, symbol)
+        mark = self._to_float(data.get("p"))
+        raw_payload = {"channel": "markPrice", "stream": stream, "data": data} if self._raw_mode else None
+        return Ticker(
+            exchange=self.exchange,
+            symbol=normalized_symbol,
+            last=None,
+            mark=mark,
+            index=None,
+            open_interest=None,
+            ts_event=ts_event,
+            ts_exchange=ts_exchange,
+            market_type=MarketType.PERP,
+            raw=raw_payload,
+        )
+
+    def _normalize_funding(self, data: Dict[str, Any], stream: Optional[str]) -> FundingUpdate | None:
+        ts_exchange = self._to_millis(data.get("E"))
+        ts_event = self._now_ms()
+        symbol = data.get("s") or (stream or "").split("@")[0].upper()
+        normalized_symbol = normalize_symbol(self.exchange, symbol)
+        rate = self._to_float(data.get("r"))
+        next_time = self._to_millis(data.get("T"))
+        mark = self._to_float(data.get("p"))
+        index = self._to_float(data.get("i"))
+        raw_payload = {"channel": "markPrice", "stream": stream, "data": data} if self._raw_mode else None
+        return FundingUpdate(
+            exchange=self.exchange,
+            symbol=normalized_symbol,
+            rate=rate,
+            next_time=next_time,
+            mark=mark,
+            index=index,
+            ts_event=ts_event,
+            ts_exchange=ts_exchange,
+            market_type=MarketType.PERP,
+            raw=raw_payload,
+        )
+
     def _parse_levels(self, levels: Iterable[Iterable[Any]]) -> List[PriceSize]:
         prices: List[PriceSize] = []
         for level in levels:
@@ -348,7 +426,13 @@ class BinanceConnector(ExchangeConnector):
         return prices
 
     def _book_state(self, symbol: str) -> _BookState:
-        return self._books.setdefault(symbol, _BookState(self._depth))
+        state = self._books.get(symbol)
+        if state is None:
+            state = _BookState(self._depth)
+            self._books[symbol] = state
+        else:
+            state.depth = self._depth
+        return state
 
     @staticmethod
     def _to_float(value: Any) -> Optional[float]:

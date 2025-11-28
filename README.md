@@ -251,9 +251,10 @@ bond/
 │   └── custom_ws.py      # Generic WebSocket connector
 │
 ├── engine/
-│   ├── schemas.py        # Event models (DO NOT MODIFY)
-│   ├── pipeline_three.py # 3-source merge + aggregate
-│   └── dispatch.py       # Redis Streams publisher/consumer
+│   ├── schemas.py          # Event models (DO NOT MODIFY)
+│   ├── venues.py           # Venue capability map
+│   ├── pipeline_native.py  # Exchange-native batch → Redis
+│   └── dispatch.py         # Redis Streams publisher/consumer
 │
 ├── sdk/
 │   └── python/ekko/

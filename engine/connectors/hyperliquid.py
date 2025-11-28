@@ -17,6 +17,7 @@ from ..schemas import (
     MarketType,
     OrderBook,
     PriceSize,
+    FundingUpdate,
     Ticker,
     Side,
     Trade,
@@ -164,6 +165,8 @@ class HyperliquidConnector(ExchangeConnector):
     def _map_channel(self, channel: str) -> str:
         if channel == "orderbook":
             return "l2Book"
+        if channel == "funding":
+            return "ticker"
         return channel
 
     def _symbol_to_coin(self, symbol: str) -> str:
@@ -241,6 +244,9 @@ class HyperliquidConnector(ExchangeConnector):
                 ticker = self._normalize_ticker(data)
                 if ticker:
                     await self._event_queue.put(ticker)
+                funding = self._normalize_funding(data)
+                if funding:
+                    await self._event_queue.put(funding)
 
     def _normalize_trade(self, data: Dict[str, Any]) -> Trade | None:
         coin = data.get("coin")
@@ -312,6 +318,31 @@ class HyperliquidConnector(ExchangeConnector):
             mark=self._to_float(data.get("markPx")),
             index=self._to_float(data.get("indexPx")),
             open_interest=self._to_float(data.get("openInterest")),
+            ts_event=ts_event,
+            ts_exchange=ts_exchange,
+            market_type=MarketType.PERP,
+            raw=raw_payload,
+        )
+
+    def _normalize_funding(self, data: Dict[str, Any]) -> FundingUpdate | None:
+        coin = data.get("coin")
+        if not coin:
+            return None
+        rate = self._to_float(data.get("funding") or data.get("fundingRate"))
+        next_time = self._to_millis(data.get("nextFundingTime") or data.get("nextFundTime"))
+        if rate is None and next_time is None:
+            return None
+        ts_exchange = self._to_millis(data.get("time"))
+        ts_event = self._now_ms()
+        normalized_symbol = self._pair_symbol(data.get("symbol") or coin, coin)
+        raw_payload = {"channel": "funding", "data": data} if self._raw_mode else None
+        return FundingUpdate(
+            exchange=self.exchange,
+            symbol=normalized_symbol,
+            rate=rate,
+            next_time=next_time,
+            mark=self._to_float(data.get("markPx")),
+            index=self._to_float(data.get("indexPx")),
             ts_event=ts_event,
             ts_exchange=ts_exchange,
             market_type=MarketType.PERP,

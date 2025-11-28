@@ -17,6 +17,7 @@ from ..schemas import (
     MarketType,
     OrderBook,
     PriceSize,
+    FundingUpdate,
     Ticker,
     Trade,
     normalize_symbol,
@@ -73,7 +74,12 @@ class _BookState:
 class BybitConnector(ExchangeConnector):
     exchange = "bybit"
     _WS_URL = "wss://stream.bybit.com/v5/public/spot"
-    _CHANNEL_MAP = {"trades": "publicTrade", "orderbook": "orderBookL2_25", "ticker": "tickers"}
+    _CHANNEL_MAP = {
+        "trades": "publicTrade",
+        "orderbook": "orderBookL2_25",
+        "ticker": "tickers",
+        "funding": "tickers",
+    }
     _PING_INTERVAL_SEC = 20
     _INITIAL_BACKOFF_SEC = 1.0
     _MAX_BACKOFF_SEC = 30.0
@@ -250,6 +256,9 @@ class BybitConnector(ExchangeConnector):
                     ticker = self._normalize_ticker(entry, payload)
                     if ticker:
                         await self._event_queue.put(ticker)
+                    funding = self._normalize_funding(entry, payload)
+                    if funding:
+                        await self._event_queue.put(funding)
 
     def _normalize_trade(self, data: Dict[str, Any], payload: Dict[str, Any]) -> Trade | None:
         price = self._to_float(data.get("price"))
@@ -352,6 +361,29 @@ class BybitConnector(ExchangeConnector):
             ts_event=ts_event,
             ts_exchange=ts_exchange,
             market_type=MarketType.SPOT,
+            raw=raw_payload,
+        )
+
+    def _normalize_funding(self, entry: Dict[str, Any], payload: Dict[str, Any]) -> FundingUpdate | None:
+        if "fundingRate" not in entry:
+            return None
+        ts_exchange = self._to_millis(payload.get("ts") or entry.get("ts"))
+        ts_event = self._now_ms()
+        symbol = entry.get("symbol") or payload.get("topic", "").split(".", 1)[-1]
+        normalized_symbol = normalize_symbol(self.exchange, symbol)
+        rate = self._to_float(entry.get("fundingRate"))
+        next_time = self._to_millis(entry.get("nextFundingTime"))
+        raw_payload = {"channel": "funding", "payload": payload} if self._raw_mode else None
+        return FundingUpdate(
+            exchange=self.exchange,
+            symbol=normalized_symbol,
+            rate=rate,
+            next_time=next_time,
+            mark=None,
+            index=None,
+            ts_event=ts_event,
+            ts_exchange=ts_exchange,
+            market_type=MarketType.PERP,
             raw=raw_payload,
         )
 

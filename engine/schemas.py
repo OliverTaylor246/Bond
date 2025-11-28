@@ -6,6 +6,7 @@ from enum import Enum
 from typing import Any, Dict, List, Literal, Optional, Sequence, Tuple
 
 from pydantic import BaseModel, Field
+from engine.venues import VenueCapabilities, VENUE_CAPABILITIES
 
 # ---------------------------------------------------------------------
 # Common types
@@ -346,6 +347,124 @@ class CountTransform(BaseModel):
 class ProjectTransform(BaseModel):
   op: Literal["project"] = "project"
   fields: list[str] = Field(description="List of fields to keep")
+
+
+# ---------------------------------------------------------------------
+# New stream config (canonical)
+# ---------------------------------------------------------------------
+
+
+class ChannelOrderBook(BaseModel):
+  enabled: bool = True
+  depth: int = Field(20, gt=0, description="Max depth to request")
+  l3: bool = Field(False, description="Request per-order L3 data if supported")
+
+
+class ChannelOHLCV(BaseModel):
+  enabled: bool = False
+  interval: str = Field("1s", description="Candle interval (e.g., 1s, 1m, 1h)")
+  mode: Literal["internal", "proxy"] = Field(
+    "internal",
+    description='proxy=exchange feed, internal=build from trades',
+  )
+
+
+class StreamChannels(BaseModel):
+  orderbook: ChannelOrderBook = Field(default_factory=ChannelOrderBook)
+  trades: bool = True
+  ticker: bool = True
+  funding: bool = False
+  ohlcv: ChannelOHLCV = Field(default_factory=ChannelOHLCV)
+  open_interest: bool = False
+
+
+class StreamConfig(BaseModel):
+  """
+  Canonical stream configuration for exchange-native pipelines.
+  """
+
+  stream_id: str
+  exchange: str
+  symbols: List[str] = Field(..., min_length=1)
+  channels: StreamChannels
+  heartbeat_ms: int = Field(2000, gt=0)
+  flush_interval_ms: int = Field(100, gt=0)
+  ttl: int = Field(10, gt=0, description="Seconds to keep stream metadata alive")
+
+  @staticmethod
+  def _caps(exchange: str) -> VenueCapabilities:
+    caps = VENUE_CAPABILITIES.get(exchange.lower())
+    if not caps:
+      raise ValueError(f"Unsupported exchange '{exchange}'")
+    return caps
+
+  @staticmethod
+  def _require(cond: bool, message: str) -> None:
+    if not cond:
+      raise ValueError(message)
+
+  def validate_against_capabilities(self) -> "StreamConfig":
+    """
+    Validate requested channels against per-venue capabilities.
+    """
+    caps = self._caps(self.exchange)
+
+    # Orderbook / depth / L3
+    if self.channels.orderbook.enabled:
+      self._require(caps.orderbook_l2, f"{self.exchange} does not support L2 orderbooks")
+      if self.channels.orderbook.l3:
+        self._require(caps.orderbook_l3, f"{self.exchange} does not support L3 orderbooks")
+      if caps.depth_limit is not None and self.channels.orderbook.depth > caps.depth_limit:
+        raise ValueError(
+          f"{self.exchange} depth capped at {caps.depth_limit} (requested {self.channels.orderbook.depth})"
+        )
+
+    # Trades
+    if self.channels.trades:
+      self._require(caps.trades, f"{self.exchange} does not support trades")
+
+    # Ticker
+    if self.channels.ticker:
+      self._require(caps.ticker, f"{self.exchange} does not support ticker channel")
+
+    # Funding
+    if self.channels.funding:
+      self._require(
+        caps.funding != "none",
+        f"{self.exchange} does not expose funding",
+      )
+
+    # OHLCV
+    if self.channels.ohlcv.enabled:
+      mode = self.channels.ohlcv.mode
+      if mode == "proxy":
+        self._require(
+          caps.ohlcv_proxy != "none",
+          f"{self.exchange} has no proxy OHLCV feed",
+        )
+      elif mode == "internal":
+        self._require(
+          caps.ohlcv_internal,
+          f"{self.exchange} cannot build internal OHLCV",
+        )
+        self._require(
+          self.channels.trades and caps.trades,
+          f"{self.exchange} internal OHLCV requires trades channel enabled",
+        )
+
+    # Open interest
+    if self.channels.open_interest:
+      self._require(
+        caps.open_interest,
+        f"{self.exchange} does not support open interest",
+      )
+
+    # Symbols sanity
+    for sym in self.symbols:
+      if not isinstance(sym, str) or not sym.strip():
+        raise ValueError("Symbols must be non-empty strings")
+
+    return self
 
 
 class StreamSpec(BaseModel):

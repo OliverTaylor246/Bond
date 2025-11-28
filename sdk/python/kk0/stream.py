@@ -1,7 +1,7 @@
 import asyncio
 import json
 import logging
-from typing import Iterable, Callable, Optional
+from typing import Iterable, Callable, Optional, Sequence, Set
 
 import websockets
 from websockets import WebSocketClientProtocol
@@ -76,18 +76,22 @@ class Stream:
         symbols: Iterable[str],
         exchanges: Iterable[str],
         depth: int = 20,
+        speed_ms: Optional[int] = None,
         raw: bool = False,
     ):
         if not self._ws:
             raise RuntimeError("WebSocket isn't connected yet")
+        channel_list = self._normalize_channels(channels)
         payload = {
             "type": "subscribe",
-            "channels": list(channels),
+            "channels": channel_list,
             "symbols": list(symbols),
             "exchanges": list(exchanges),
             "depth": depth,
             "raw": raw,
         }
+        if speed_ms is not None:
+            payload["speed_ms"] = int(speed_ms)
         payload_json = json.dumps(payload)
 
         # /raw endpoints do NOT accept subscribe messages
@@ -134,3 +138,16 @@ class Stream:
                 self._ws = None
                 await asyncio.sleep(self.reconnect_interval)
                 continue
+
+    def _normalize_channels(self, channels: Iterable[str]) -> list[str]:
+        normalized: Set[str] = set()
+        for ch in channels or []:
+            lowered = str(ch).strip().lower()
+            if not lowered:
+                continue
+            if lowered in {"price", "prices"}:
+                lowered = "ticker"
+            normalized.add(lowered)
+        if not normalized:
+            normalized = {"trades", "orderbook"}
+        return list(normalized)

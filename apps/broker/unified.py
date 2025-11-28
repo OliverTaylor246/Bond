@@ -27,7 +27,7 @@ from engine.schemas import BaseEvent, EventType, Heartbeat, Millis, RawMessage, 
 logger = logging.getLogger(__name__)
 
 DEFAULT_SYMBOLS = ("BTC/USDT", "SOL/USDT")
-DEFAULT_CHANNELS = ("trades", "orderbook")
+DEFAULT_CHANNELS = ("trades", "orderbook", "ticker", "funding")
 DEFAULT_DEPTH = 20
 MAX_LAG_MS = 100
 
@@ -44,6 +44,7 @@ UNIFIED_RAW_MODES = {"unified", "broker", "manager", "aggregated"}
 
 
 HEARTBEAT_INTERVAL_SEC = 30
+DEFAULT_BOOK_SPEED_MS = 100
 
 
 class UnifiedBrokerManager:
@@ -57,9 +58,11 @@ class UnifiedBrokerManager:
         self._clients_lock = asyncio.Lock()
         self._raw_clients: Set[WebSocket] = set()
         self._client_depths: Dict[WebSocket, int] = {}
+        self._client_speeds: Dict[WebSocket, int] = {}
         self._raw_subscribers = 0
         self._raw_mode_enabled = False
         self._depth = DEFAULT_DEPTH
+        self._book_speed_ms = DEFAULT_BOOK_SPEED_MS
         self._connector_config_lock = asyncio.Lock()
         self._connectors: List[ExchangeConnector] = [
             BinanceConnector(),
@@ -93,18 +96,22 @@ class UnifiedBrokerManager:
         self._connector_subscription_specs.clear()
         self._connector_tasks = []
         self._client_depths.clear()
+        self._client_speeds.clear()
         self._raw_subscribers = 0
         self._raw_mode_enabled = False
         self._depth = DEFAULT_DEPTH
+        self._book_speed_ms = DEFAULT_BOOK_SPEED_MS
 
         for connector in self._connectors:
             await connector.connect()
             spec = self._default_subscription_spec(connector)
             self._connector_subscription_specs[connector.exchange] = spec
-            await connector.subscribe(
+            await self._subscribe_connector(
+                connector,
                 symbols=spec["symbols"],
                 channels=spec["channels"],
                 depth=self._depth,
+                speed_ms=self._book_speed_ms,
                 raw=False,
             )
             task = asyncio.create_task(self._run_connector(connector))
@@ -144,10 +151,12 @@ class UnifiedBrokerManager:
         async with self._clients_lock:
             self._clients.clear()
             self._client_depths.clear()
+            self._client_speeds.clear()
         self._heartbeat_tasks.clear()
         self._raw_subscribers = 0
         self._raw_mode_enabled = False
         self._depth = DEFAULT_DEPTH
+        self._book_speed_ms = DEFAULT_BOOK_SPEED_MS
         self._connector_subscription_specs.clear()
 
     async def _run_connector(self, connector: ExchangeConnector) -> None:
@@ -201,17 +210,8 @@ class UnifiedBrokerManager:
                     exchanges=spec.get("exchanges"),
                 ):
                     continue
-                channel: Optional[str] = None
-                if event.type == EventType.TRADE:
-                    channel = "trades"
-                elif event.type == EventType.ORDERBOOK:
-                    channel = "orderbook"
-                elif event.type == EventType.RAW:
-                    if not spec.get("raw"):
-                        continue
-                    channel = "raw"
-                channels = spec.get("channels") or set()
-                if channel and "*" not in channels and channel not in channels:
+                channel = self._event_to_channel(event, spec)
+                if channel is None:
                     continue
                 subscribers.append(ws)
         for ws in subscribers:
@@ -239,6 +239,7 @@ class UnifiedBrokerManager:
         symbols = self._normalize_symbols(payload.get("symbols")) or {"*"}
         exchanges = self._normalize_exchanges(payload.get("exchanges")) or {"*"}
         depth_value = self._normalize_depth(payload.get("depth")) or DEFAULT_DEPTH
+        speed_value = self._normalize_speed(payload.get("speed_ms")) or DEFAULT_BOOK_SPEED_MS
 
         async with self._clients_lock:
             self._clients[websocket] = {
@@ -247,14 +248,17 @@ class UnifiedBrokerManager:
                 "channels": channels,
                 "raw": raw_flag,
                 "depth": depth_value,
+                "speed_ms": speed_value,
             }
             self._client_depths[websocket] = depth_value
+            self._client_speeds[websocket] = speed_value
             if raw_flag:
                 self._raw_subscribers += 1
             depth_needed = self._calculate_target_depth()
+            speed_needed = self._calculate_target_speed()
             raw_needed = self._raw_subscribers > 0
 
-        await self._maybe_update_connector_configs(depth_needed, raw_needed)
+        await self._maybe_update_connector_configs(depth_needed, speed_needed, raw_needed)
         heartbeat_task = asyncio.create_task(self._heartbeat_loop(websocket))
         self._heartbeat_tasks[websocket] = heartbeat_task
 
@@ -264,10 +268,12 @@ class UnifiedBrokerManager:
             if spec and spec.get("raw"):
                 self._raw_subscribers = max(self._raw_subscribers - 1, 0)
             self._client_depths.pop(websocket, None)
+            self._client_speeds.pop(websocket, None)
             depth_needed = self._calculate_target_depth()
+            speed_needed = self._calculate_target_speed()
             raw_needed = self._raw_subscribers > 0
 
-        await self._maybe_update_connector_configs(depth_needed, raw_needed)
+        await self._maybe_update_connector_configs(depth_needed, speed_needed, raw_needed)
         task = self._heartbeat_tasks.pop(websocket, None)
         if task:
             task.cancel()
@@ -314,13 +320,15 @@ class UnifiedBrokerManager:
         }
 
     async def _maybe_update_connector_configs(
-        self, depth_needed: int, raw_needed: bool
+        self, depth_needed: int, speed_needed: int, raw_needed: bool
     ) -> None:
         depth_changed = depth_needed != self._depth
+        speed_changed = speed_needed != self._book_speed_ms
         raw_changed = raw_needed != self._raw_mode_enabled
         self._depth = depth_needed
+        self._book_speed_ms = speed_needed
         self._raw_mode_enabled = raw_needed
-        if not self._running or (not depth_changed and not raw_changed):
+        if not self._running or (not depth_changed and not raw_changed and not speed_changed):
             return
         await self._apply_connector_subscriptions()
 
@@ -329,16 +337,19 @@ class UnifiedBrokerManager:
             return
         async with self._connector_config_lock:
             depth = self._depth
+            speed_ms = self._book_speed_ms
             raw = self._raw_mode_enabled
             for connector in self._connectors:
                 spec = self._connector_subscription_specs.get(connector.exchange)
                 if not spec:
                     continue
                 try:
-                    await connector.subscribe(
+                    await self._subscribe_connector(
+                        connector,
                         symbols=list(spec["symbols"]),
                         channels=list(spec["channels"]),
                         depth=depth,
+                        speed_ms=speed_ms,
                         raw=raw,
                     )
                 except Exception:
@@ -362,6 +373,32 @@ class UnifiedBrokerManager:
     def _default_channels(self) -> List[str]:
         return list(DEFAULT_CHANNELS)
 
+    async def _subscribe_connector(
+        self,
+        connector: ExchangeConnector,
+        *,
+        symbols: List[str],
+        channels: List[str],
+        depth: int,
+        speed_ms: int,
+        raw: bool,
+    ) -> None:
+        if connector.exchange == "binance":
+            await connector.subscribe(
+                symbols=symbols,
+                channels=channels,
+                depth=depth,
+                speed_ms=speed_ms,
+                raw=raw,
+            )
+            return
+        await connector.subscribe(
+            symbols=symbols,
+            channels=channels,
+            depth=depth,
+            raw=raw,
+        )
+
     def _build_raw_event(self, event: BaseEvent) -> RawMessage:
         payload = {"type": event.type.value, "data": event.raw}
         return RawMessage(
@@ -376,6 +413,11 @@ class UnifiedBrokerManager:
         if not self._client_depths:
             return DEFAULT_DEPTH
         return max(self._client_depths.values())
+
+    def _calculate_target_speed(self) -> int:
+        if not self._client_speeds:
+            return DEFAULT_BOOK_SPEED_MS
+        return min(self._client_speeds.values())
 
     def _normalize_symbols(self, raw_symbols: Any) -> Set[str]:
         result: Set[str] = set()
@@ -407,11 +449,32 @@ class UnifiedBrokerManager:
             if item is None:
                 continue
             candidate = str(item).strip().lower()
+            if candidate in {"price", "prices"}:
+                candidate = "ticker"
             if candidate:
                 result.add(candidate)
         if not result:
             result = set(DEFAULT_CHANNELS)
         return result
+
+    def _event_to_channel(self, event: BaseEvent, spec: Dict[str, Any]) -> Optional[str]:
+        channel: Optional[str] = None
+        if event.type == EventType.TRADE:
+            channel = "trades"
+        elif event.type == EventType.ORDERBOOK:
+            channel = "orderbook"
+        elif event.type == EventType.TICKER:
+            channel = "ticker"
+        elif event.type == EventType.FUNDING:
+            channel = "funding"
+        elif event.type == EventType.RAW:
+            if not spec.get("raw"):
+                return None
+            channel = "raw"
+        channels = spec.get("channels") or set()
+        if channel and "*" not in channels and channel not in channels:
+            return None
+        return channel
 
     @staticmethod
     def _normalize_depth(value: Any) -> Optional[int]:
@@ -422,6 +485,18 @@ class UnifiedBrokerManager:
             if depth <= 0:
                 return None
             return depth
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _normalize_speed(value: Any) -> Optional[int]:
+        if value is None:
+            return None
+        try:
+            speed = int(value)
+            if speed <= 0:
+                return None
+            return speed
         except (TypeError, ValueError):
             return None
 
@@ -494,6 +569,7 @@ async def _websocket_raw_direct(
     symbols: list[str] | None,
     channels: list[str] | None,
     depth: int | None,
+    speed_ms: int | None,
     raw: bool | None,
     exchange: str | None = None,
 ) -> None:
@@ -504,6 +580,7 @@ async def _websocket_raw_direct(
     channel_set = manager._normalize_channels(channels)
     channel_list = sorted(channel_set)
     depth_value = manager._normalize_depth(depth) or DEFAULT_DEPTH
+    speed_value = manager._normalize_speed(speed_ms) or DEFAULT_BOOK_SPEED_MS
     raw_mode = manager._to_bool(raw)
     exchange_filter: List[str] = []
     if exchange:
@@ -537,12 +614,21 @@ async def _websocket_raw_direct(
             connector = connector_cls()
             connectors.append(connector)
             await connector.connect()
-            await connector.subscribe(
-                symbols=normalized_symbols,
-                channels=channel_list,
-                depth=depth_value,
-                raw=raw_mode,
-            )
+            if connector.exchange == "binance":
+                await connector.subscribe(
+                    symbols=normalized_symbols,
+                    channels=channel_list,
+                    depth=depth_value,
+                    speed_ms=speed_value,
+                    raw=raw_mode,
+                )
+            else:
+                await connector.subscribe(
+                    symbols=normalized_symbols,
+                    channels=channel_list,
+                    depth=depth_value,
+                    raw=raw_mode,
+                )
             tasks.append(asyncio.create_task(_pump_connector_events(websocket, connector)))
         await websocket.send_json(
             {
@@ -623,6 +709,7 @@ async def websocket_raw(websocket: WebSocket):
     symbols = params.getlist("symbols")
     channels = params.getlist("channels")
     depth = params.get("depth")
+    speed_ms = params.get("speed_ms") or params.get("speed")
     raw = params.get("raw")
     exchange = params.get("exchange")
     # Support multi-query params like ?exchanges=binance&exchanges=bybit
@@ -651,6 +738,7 @@ async def websocket_raw(websocket: WebSocket):
         symbols=requested_symbols,
         channels=channels,
         depth=depth,
+        speed_ms=speed_ms,
         raw=raw,
         exchange=exchange,
     )
